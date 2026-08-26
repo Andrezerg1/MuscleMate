@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+@layer base {
+  :root {
+    --background: 222 30% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 221 25% 10%;
+    --card-foreground: 210 20% 96%;
+
+    --popover: 221 25% 10%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: 163 82% 54%;
+    --primary-foreground: 221 30% 8%;
+
+    --secondary: 220 20% 15%;
+    --secondary-foreground: 210 18% 87%;
+
+    --muted: 220 20% 14%;
+    --muted-foreground: 216 12% 62%;
+
+    --accent: 163 82% 54%;
+    --accent-foreground: 221 30% 8%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 218 18% 20%;
+    --input: 218 18% 20%;
+    --ring: 163 82% 54%;
+
+    --radius: 1rem;
+
+    --sidebar-background: 220 18% 8%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 142 72% 50%;
+    --sidebar-primary-foreground: 220 20% 6%;
+    --sidebar-accent: 220 14% 14%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 220 14% 18%;
+    --sidebar-ring: 142 72% 50%;
+
+    /* Custom tokens */
+    --glow: 163 82% 54%;
+    --warning: 38 92% 56%;
+    --success: 163 82% 54%;
+    --danger: 0 74% 61%;
+    --gradient-primary: linear-gradient(135deg, hsl(163 82% 54%), hsl(188 85% 58%));
+    --gradient-dark: linear-gradient(150deg, hsl(222 30% 7%), hsl(222 28% 10%));
+    --shadow-glow: 0 16px 40px -18px hsl(163 82% 54% / 0.45);
+    --shadow-glow-lg: 0 24px 70px -26px hsl(163 82% 54% / 0.45);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'DM Sans', sans-serif;
+    min-width: 320px;
+    background-image: radial-gradient(circle at 85% -10%, hsl(163 82% 54% / 0.12), transparent 27rem);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', sans-serif;
+    letter-spacing: -0.035em;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 24px hsl(163 82% 54% / 0.3);
+  }
+
+  .border-glow {
+    box-shadow: 0 0 0 1px hsl(163 82% 54% / 0.22), 0 16px 40px -24px hsl(163 82% 54% / 0.5);
+  }
+
+  .bg-grid {
+    background-image: 
+      linear-gradient(hsl(218 18% 20% / 0.35) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(218 18% 20% / 0.35) 1px, transparent 1px);
+    background-size: 72px 72px;
+  }
+
+  .surface {
+    @apply border border-border/80 bg-card/80 backdrop-blur-sm;
+    box-shadow: 0 18px 45px -34px hsl(222 35% 3% / 0.9);
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary;
+  }
+}
