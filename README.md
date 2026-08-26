@@ -1,73 +1,59 @@
-# Welcome to your Lovable project
+# MuscleMate
 
-## Project info
+Sistema de correção postural em tempo real para exercícios de musculação.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Visão geral
 
-## How can I edit this code?
+O MuscleMate usa a câmera do dispositivo e o modelo MoveNet, executado no navegador, para estimar pontos corporais, calcular ângulos articulares e fornecer feedback durante o exercício. A aplicação também contabiliza repetições, gera um relatório da série e salva o histórico autenticado no Supabase.
 
-There are several ways of editing your application.
+## Stack
 
-**Use Lovable**
+- React, TypeScript e Vite
+- TensorFlow.js, MoveNet e WebGL
+- Supabase Auth e PostgreSQL
+- Tailwind CSS, Radix UI e Framer Motion
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Exercícios suportados
 
-Changes made via Lovable will be committed automatically to this repo.
+Agachamento, rosca direta, supino, levantamento terra e afundo.
 
-**Use your preferred IDE**
+## Desenvolvimento local
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Requisitos: Node.js 20+ e npm ou pnpm.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+pnpm install
+pnpm dev
 ```
 
-**Edit a file directly in GitHub**
+Para validar o projeto:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+pnpm exec tsc -p tsconfig.app.json --noEmit
+pnpm lint
+pnpm test
+```
 
-**Use GitHub Codespaces**
+## Variáveis de ambiente
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Crie um arquivo `.env` local com:
 
-## What technologies are used for this project?
+```env
+VITE_SUPABASE_PROJECT_ID=seu-projeto
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sua-chave-publicável
+```
 
-This project is built with:
+O arquivo `.env` é ignorado pelo Git e nunca deve ser publicado.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Banco de dados
 
-## How can I deploy this project?
+As migrações do Supabase estão em `supabase/migrations`. Elas criam perfis, histórico de treinos, gatilho de novos usuários e políticas de segurança por usuário.
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Organização
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- `src/pages`: telas da aplicação
+- `src/components`: componentes visuais e navegação
+- `src/lib/poseUtils.ts`: cálculo de ângulos, feedback e contador de repetições
+- `src/lib/exercises.ts`: catálogo e critérios dos exercícios
+- `src/integrations/supabase`: cliente e tipos do banco
