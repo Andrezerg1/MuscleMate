@@ -148,8 +148,43 @@ export function checkBicepCurlPosition(keypoints: Keypoint[] | null): PositionCh
   return { ready: true, message: "Perfil correto — pode iniciar a série" };
 }
 
+/**
+ * Squat analysis also depends on a lateral view so the knee angle and depth
+ * can be measured reliably. The same shoulder/torso ratio used by the curl
+ * checker keeps the setup guidance consistent across exercises.
+ */
+export function checkSquatPosition(keypoints: Keypoint[] | null): PositionCheck {
+  if (!keypoints) return { ready: false, message: "Nenhuma pessoa detectada — entre no enquadramento" };
+
+  const { LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE } = KEYPOINTS;
+  const ls = keypoints[LEFT_SHOULDER];
+  const rs = keypoints[RIGHT_SHOULDER];
+  const lh = keypoints[LEFT_HIP];
+  const rh = keypoints[RIGHT_HIP];
+  if (!ls || !rs || !lh || !rh) return { ready: false, message: "Corpo não detectado — afaste-se da câmera" };
+
+  const rightLegVisible = [RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE].every((index) => isVisible(keypoints, index));
+  const leftLegVisible = [LEFT_HIP, LEFT_KNEE, LEFT_ANKLE].every((index) => isVisible(keypoints, index));
+  if (!rightLegVisible && !leftLegVisible) {
+    return { ready: false, message: "Pernas não visíveis — enquadre quadril, joelho e tornozelo" };
+  }
+
+  const shoulderSpan = Math.abs(ls.x - rs.x);
+  const torso = Math.max(1, Math.abs((ls.y + rs.y) / 2 - (lh.y + rh.y) / 2));
+  const ratio = shoulderSpan / torso;
+
+  if (ratio > 0.75) {
+    return { ready: false, message: "Vire-se de lado para a câmera (visão de perfil)" };
+  }
+  if (ratio > 0.5) {
+    return { ready: false, message: "Quase lá — gire mais o corpo até ficar totalmente de perfil" };
+  }
+  return { ready: true, message: "Perfil correto — pode iniciar o agachamento" };
+}
+
 export const positionCheckers: Record<string, (keypoints: Keypoint[] | null) => PositionCheck> = {
   "bicep-curl": checkBicepCurlPosition,
+  squat: checkSquatPosition,
 };
 
 export function analyzeBicepCurl(keypoints: Keypoint[]): FeedbackResult | null {

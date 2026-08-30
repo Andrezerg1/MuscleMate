@@ -17,7 +17,7 @@ export const exercises: Exercise[] = [
     nameEn: "Squat",
     description: "Exercício composto que trabalha quadríceps, glúteos e core. Fundamental para força de membros inferiores.",
     landmarks: ["Quadril", "Joelho", "Tornozelo"],
-    correctCriteria: "Joelho alinhado com o pé; ângulo joelho 90°±10° na descida; coluna neutra",
+    correctCriteria: "Execução lateralizada; joelho alinhado com o pé; ângulo joelho 90°±10° na descida; coluna neutra",
     commonErrors: [
       { error: "Joelho para dentro (valgo)", feedback: "Empurre os joelhos para fora" },
       { error: "Amplitude incompleta", feedback: "Desça mais, paralelo ao chão" },
