@@ -21,7 +21,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter basename="/MuscleMate">
         <AuthProvider>
           <Navbar />
           <Routes>
