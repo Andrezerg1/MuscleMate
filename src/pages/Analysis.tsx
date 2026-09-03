@@ -52,6 +52,7 @@ const AnalysisPage = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelReady, setModelReady] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [selectedExercise, setSelectedExercise] = useState(exercises[0]);
   const [feedback, setFeedback] = useState<FeedbackResult | null>(null);
   const [repCount, setRepCount] = useState(0);
@@ -203,6 +204,7 @@ const AnalysisPage = () => {
   const loadModel = useCallback(async () => {
     if (detectorRef.current) return;
     setModelLoading(true);
+    setModelError(null);
 
     try {
       await tf.setBackend("webgl");
@@ -226,7 +228,7 @@ const AnalysisPage = () => {
       setModelReady(true);
     } catch (err) {
       console.error("Erro ao carregar modelo:", err);
-      alert("Erro ao carregar o modelo de detecção de pose. Tente recarregar a página.");
+      setModelError("A câmera está ativa, mas o modelo de análise não carregou. Tente novamente em instantes.");
     } finally {
       setModelLoading(false);
     }
@@ -247,8 +249,8 @@ const AnalysisPage = () => {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      await loadModel();
       setCameraActive(true);
+      await loadModel();
     } catch (error) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -506,11 +508,28 @@ const AnalysisPage = () => {
         <div className="space-y-5">
           {/* Video feed */}
           <div className="relative rounded-3xl border border-border bg-card overflow-hidden aspect-[3/4] sm:aspect-video shadow-2xl shadow-black/20">
-            <video ref={videoRef} className="hidden" playsInline muted />
+            <video
+              ref={videoRef}
+              className={`h-full w-full object-cover -scale-x-100 ${!cameraActive || modelReady ? "hidden" : ""}`}
+              playsInline
+              muted
+            />
             <canvas
               ref={canvasRef}
-              className={`w-full h-full object-cover ${!cameraActive ? "hidden" : ""}`}
+              className={`w-full h-full object-cover ${!cameraActive || !modelReady ? "hidden" : ""}`}
             />
+
+            {cameraActive && (modelLoading || modelError) && (
+              <div className="absolute left-4 right-4 top-4 rounded-xl border border-border bg-background/85 px-4 py-3 text-center text-xs backdrop-blur-sm">
+                {modelLoading ? (
+                  <span className="inline-flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> Preparando análise de movimento...
+                  </span>
+                ) : (
+                  <span className="text-danger">{modelError}</span>
+                )}
+              </div>
+            )}
 
             {!cameraActive && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
@@ -539,18 +558,18 @@ const AnalysisPage = () => {
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
               <button
                 onClick={cameraActive ? stopCamera : startCamera}
-                disabled={modelLoading}
+                disabled={modelLoading && !cameraActive}
                 className={`inline-flex items-center gap-2 rounded-full px-6 py-3 font-bold text-sm shadow-lg transition-all disabled:opacity-50 ${
                   cameraActive ? "bg-danger text-foreground" : "bg-primary text-primary-foreground"
                 }`}
               >
-                {modelLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
-                  </>
-                ) : cameraActive ? (
+                {cameraActive ? (
                   <>
                     <CameraOff className="w-4 h-4" /> Parar
+                  </>
+                ) : modelLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
                   </>
                 ) : (
                   <>
