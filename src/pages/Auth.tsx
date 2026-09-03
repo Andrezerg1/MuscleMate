@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, ArrowRight, Loader2 } from "lucide-react";
+import { Activity, ArrowRight, Loader2, UserRound } from "lucide-react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,12 +24,17 @@ const AuthPage = () => {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
-  const { user } = useAuth();
+  const { user, enterGuest } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) navigate("/analise", { replace: true });
   }, [user, navigate]);
+
+  const handleGuestAccess = () => {
+    enterGuest();
+    navigate("/analise", { replace: true });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,6 +164,19 @@ const AuthPage = () => {
             </button>
           </form>
         )}</div>
+        {mode === "login" && !emailSent && (
+          <button
+            type="button"
+            onClick={handleGuestAccess}
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl border border-border py-3 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+          >
+            <UserRound className="h-4 w-4" />
+            Usar como visitante
+          </button>
+        )}
+        {mode === "login" && !emailSent && (
+          <p className="mt-3 text-center text-xs text-muted-foreground">Sem cadastro, seus treinos não serão salvos no histórico.</p>
+        )}
       </div>
     </main>
   );

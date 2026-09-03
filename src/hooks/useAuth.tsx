@@ -5,20 +5,25 @@ import { supabase } from "@/integrations/supabase/client";
 interface AuthContextValue {
   user: User | null;
   session: Session | null;
+  isGuest: boolean;
   loading: boolean;
+  enterGuest: () => void;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   session: null,
+  isGuest: false,
   loading: true,
+  enterGuest: () => {},
   signOut: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [isGuest, setIsGuest] = useState(() => sessionStorage.getItem("musclemate-guest") === "true");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,11 +43,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signOut = async () => {
+    sessionStorage.removeItem("musclemate-guest");
+    setIsGuest(false);
     await supabase.auth.signOut();
   };
 
+  const enterGuest = () => {
+    sessionStorage.setItem("musclemate-guest", "true");
+    setIsGuest(true);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider value={{ user, session, isGuest, loading, enterGuest, signOut }}>
       {children}
     </AuthContext.Provider>
   );
