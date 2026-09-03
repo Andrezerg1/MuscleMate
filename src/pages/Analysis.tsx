@@ -46,6 +46,7 @@ const AnalysisPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelReady, setModelReady] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState(exercises[0]);
@@ -233,20 +234,34 @@ const AnalysisPage = () => {
   }, []);
 
   const startCamera = useCallback(async () => {
+    setCameraError(null);
     try {
-      await loadModel();
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("secure-context");
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { ideal: "user" } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      await loadModel();
       setCameraActive(true);
-    } catch {
-      alert("Não foi possível acessar a câmera. Verifique as permissões.");
+    } catch (error) {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      const name = error instanceof DOMException ? error.name : "";
+      const message = name === "NotAllowedError" || name === "PermissionDeniedError"
+        ? "A permissão da câmera foi bloqueada. Autorize o acesso nas configurações do navegador e tente novamente."
+        : name === "NotFoundError"
+          ? "Nenhuma câmera foi encontrada neste dispositivo."
+          : error instanceof Error && error.message === "secure-context"
+            ? "A câmera só funciona em uma conexão segura (HTTPS)."
+            : "Não foi possível iniciar a câmera. Verifique se ela está disponível e tente novamente.";
+      setCameraError(message);
     }
   }, [loadModel]);
 
@@ -513,6 +528,7 @@ const AnalysisPage = () => {
                     <p className="text-muted-foreground text-sm px-6 text-center">
                       {selectedExercise.cameraPosition}
                     </p>
+                    {cameraError && <p className="max-w-sm px-6 text-center text-xs text-danger">{cameraError}</p>}
                   </>
                 )}
               </div>
