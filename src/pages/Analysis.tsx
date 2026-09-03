@@ -17,6 +17,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 import type { PoseDetector, Keypoint } from "@tensorflow-models/pose-detection";
+import * as tf from "@tensorflow/tfjs-core";
+import "@tensorflow/tfjs-backend-webgl";
+import * as poseDetection from "@tensorflow-models/pose-detection";
 
 interface WorkoutSession {
   id: string;
@@ -202,12 +205,8 @@ const AnalysisPage = () => {
     setModelLoading(true);
 
     try {
-      // Dynamic imports to avoid blocking initial load
-      const tf = await import("@tensorflow/tfjs-core");
-      await import("@tensorflow/tfjs-backend-webgl");
       await tf.setBackend("webgl");
       await tf.ready();
-      const poseDetection = await import("@tensorflow-models/pose-detection");
 
       // Thunder is more accurate but heavier — use Lightning on mobile devices
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
