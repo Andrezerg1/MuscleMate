@@ -51,7 +51,7 @@ const AuthPage = () => {
           email: parsed.data.email,
           password: parsed.data.password,
           options: {
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href,
             data: { full_name: parsed.data.fullName },
           },
         });

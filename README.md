@@ -34,21 +34,34 @@ pnpm lint
 pnpm test
 ```
 
-## Variáveis de ambiente
+## Configuração do Supabase
 
-Crie um arquivo `.env` local com:
+Projeto ativo: `khjkayzjlizajambzgvy`.
+URL: https://khjkayzjlizajambzgvy.supabase.co
 
-```env
-VITE_SUPABASE_PROJECT_ID=seu-projeto
-VITE_SUPABASE_URL=https://seu-projeto.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=sua-chave-publicável
-```
+A URL e a chave publicável estão em `src/integrations/supabase/client.ts`.
+Essa chave foi feita para uso no navegador; as políticas RLS protegem os dados.
+Não coloque chaves secretas, service_role ou senhas em código frontend.
 
-O arquivo `.env` é ignorado pelo Git e nunca deve ser publicado.
+O cliente está fixado no projeto ativo e não usa variáveis de ambiente antigas.
+Isso também permite que o GitHub Actions publique a configuração correta sem
+depender de um arquivo `.env`, que continua ignorado pelo Git.
+
+A sessão usa uma chave de armazenamento específica deste projeto. Sessões de
+outros projetos não são lidas nem reutilizadas.
+
+No painel Authentication > URL Configuration, o Site URL e o retorno permitido
+de produção são `https://andrezerg1.github.io/MuscleMate/`.
+O cadastro exige confirmação de e-mail. O modo visitante não grava histórico.
 
 ## Banco de dados
 
 As migrações do Supabase estão em `supabase/migrations`. Elas criam perfis, histórico de treinos, gatilho de novos usuários e políticas de segurança por usuário.
+
+As tabelas foram provisionadas no projeto ativo pelo SQL Editor. Os arquivos de
+migração servem como referência reproduzível da estrutura; não reaplique a criação
+de tabelas sobre um banco já provisionado. Contas e históricos de outros projetos
+não são transferidos automaticamente.
 
 ## Organização
 
