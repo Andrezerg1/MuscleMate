@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, KeyRound, Loader2, Mail, Phone, Save, UserRound } from "lucide-react";
+import { Camera, Loader2, Mail, Phone, Save, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,7 +14,6 @@ const Profile = () => {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
-  const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -102,11 +101,6 @@ const Profile = () => {
       toast.error("Informe um e-mail válido.");
       return;
     }
-    if (newPassword && newPassword.length < 6) {
-      toast.error("A nova senha deve ter ao menos 6 caracteres.");
-      return;
-    }
-
     setSaving(true);
     try {
       const { error: profileError } = await supabase.from("profiles").upsert({
@@ -118,15 +112,13 @@ const Profile = () => {
       });
       if (profileError) throw profileError;
 
-      const authUpdates: { email?: string; password?: string; data: { full_name: string } } = {
+      const authUpdates: { email?: string; data: { full_name: string } } = {
         data: { full_name: trimmedName },
       };
       if (trimmedEmail !== user.email) authUpdates.email = trimmedEmail;
-      if (newPassword) authUpdates.password = newPassword;
       const { error: authError } = await supabase.auth.updateUser(authUpdates);
       if (authError) throw authError;
 
-      setNewPassword("");
       toast.success(trimmedEmail !== user.email ? "Perfil salvo. Confirme o novo e-mail para concluir a alteração." : "Perfil atualizado.");
     } catch {
       toast.error("Não foi possível salvar as alterações.");
@@ -177,10 +169,6 @@ const Profile = () => {
             <label className="space-y-2 text-sm font-medium">
               <span className="flex items-center gap-2"><Phone className="h-4 w-4 text-primary" /> Telefone <span className="font-normal text-muted-foreground">(opcional)</span></span>
               <input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={30} autoComplete="tel" placeholder="(00) 00000-0000" className={fieldClass} />
-            </label>
-            <label className="space-y-2 text-sm font-medium">
-              <span className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-primary" /> Nova senha</span>
-              <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} maxLength={72} autoComplete="new-password" placeholder="Deixe em branco para manter" className={fieldClass} />
             </label>
           </div>
 
