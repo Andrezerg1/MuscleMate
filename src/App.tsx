@@ -12,6 +12,7 @@ import Exercises from "./pages/Exercises";
 import Analysis from "./pages/Analysis";
 import About from "./pages/About";
 import Auth from "./pages/Auth";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -37,6 +38,14 @@ const App = () => (
             />
             <Route path="/sobre" element={<About />} />
             <Route path="/auth" element={<Auth />} />
+            <Route
+              path="/perfil"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />

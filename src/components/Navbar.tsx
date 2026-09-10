@@ -1,14 +1,30 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Activity, Menu, X, LogOut } from "lucide-react";
+import { Activity, Menu, X, LogOut, Settings, UserRound } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, signOut } = useAuth();
+  const displayName = user?.user_metadata.full_name || user?.email?.split("@")[0] || "Usuário";
+  const initials = displayName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part: string) => part[0])
+    .join("")
+    .toUpperCase();
 
   const handleSignOut = async () => {
     await signOut();
@@ -59,12 +75,29 @@ const Navbar = () => {
 
         <div className="hidden md:flex items-center gap-2">
           {user ? (
-            <button
-              onClick={handleSignOut}
-              className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <LogOut className="w-4 h-4" /> Sair
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" aria-label="Abrir menu do perfil" className="rounded-full outline-none ring-offset-background transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+                  <Avatar className="h-10 w-10 border border-primary/30 bg-secondary">
+                    <AvatarImage src={user.user_metadata.avatar_url} alt={`Foto de ${displayName}`} className="object-cover" />
+                    <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">{initials}</AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={10} className="w-64 rounded-2xl border-border/80 bg-card/95 p-2 shadow-2xl backdrop-blur-xl">
+                <DropdownMenuLabel className="px-3 py-2.5">
+                  <span className="block truncate font-display font-bold">{displayName}</span>
+                  <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">{user.email}</span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer rounded-xl px-3 py-2.5">
+                  <Link to="/perfil" className="flex items-center gap-3"><Settings className="h-4 w-4 text-primary" /> Meu perfil</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void handleSignOut()} className="cursor-pointer gap-3 rounded-xl px-3 py-2.5 text-muted-foreground focus:text-foreground">
+                  <LogOut className="h-4 w-4" /> Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
           <Link
             to={user ? "/analise" : "/auth"}
@@ -102,12 +135,14 @@ const Navbar = () => {
             </Link>
           ))}
           {user ? (
-            <button
-              onClick={handleSignOut}
-              className="w-full text-left px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground"
-            >
-              Sair
-            </button>
+            <>
+              <Link to="/perfil" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground">
+                <UserRound className="h-4 w-4" /> Meu perfil
+              </Link>
+              <button onClick={handleSignOut} className="flex w-full items-center gap-2 px-4 py-2 rounded-lg text-left text-sm font-medium text-muted-foreground">
+                <LogOut className="h-4 w-4" /> Sair
+              </button>
+            </>
           ) : (
             <Link
               to="/auth"
