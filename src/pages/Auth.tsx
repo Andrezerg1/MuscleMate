@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, ArrowRight, Loader2, UserRound } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Loader2, MailCheck, UserRound } from "lucide-react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,7 +18,7 @@ const signInSchema = z.object({
 });
 
 const AuthPage = () => {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,7 +41,21 @@ const AuthPage = () => {
     setSubmitting(true);
 
     try {
-      if (mode === "signup") {
+      if (mode === "forgot") {
+        const parsed = z.string().trim().email("E-mail inválido").max(255).safeParse(email);
+        if (!parsed.success) {
+          toast.error(parsed.error.issues[0].message);
+          return;
+        }
+        const redirectTo = new URL(`${import.meta.env.BASE_URL}redefinir-senha`, window.location.origin).href;
+        const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, { redirectTo });
+        if (error) {
+          toast.error("Não foi possível enviar o e-mail de recuperação.");
+          return;
+        }
+        setEmailSent(true);
+        toast.success("Enviamos as instruções para redefinir sua senha.");
+      } else if (mode === "signup") {
         const parsed = signUpSchema.safeParse({ fullName, email, password });
         if (!parsed.success) {
           toast.error(parsed.error.issues[0].message);
@@ -94,13 +108,13 @@ const AuthPage = () => {
         <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"><Activity className="h-5 w-5" /></div>
         <p className="eyebrow mb-3">Sua área de treino</p>
         <h1 className="font-display text-3xl font-bold mb-2">
-          {mode === "login" ? "Entrar" : "Criar conta"}
+          {mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Recuperar senha"}
         </h1>
         <p className="text-sm text-muted-foreground mb-7">
-          Salve seus treinos e acompanhe sua evolução.
+          {mode === "forgot" ? "Digite seu e-mail para receber um link de recuperação." : "Salve seus treinos e acompanhe sua evolução."}
         </p>
 
-        <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-secondary/60 p-1 mb-6">
+        {mode !== "forgot" && <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-secondary/60 p-1 mb-6">
           {(["login", "signup"] as const).map((m) => (
             <button
               key={m}
@@ -116,12 +130,13 @@ const AuthPage = () => {
               {m === "login" ? "Login" : "Cadastro"}
             </button>
           ))}
-        </div>
+        </div>}
 
         {emailSent ? (
           <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5 text-sm text-muted-foreground">
-            Enviamos um link de confirmação para <span className="text-foreground">{email}</span>.
-            Confirme para acessar sua conta.
+            <MailCheck className="mb-3 h-6 w-6 text-primary" />
+            Enviamos {mode === "forgot" ? "um link de recuperação" : "um link de confirmação"} para <span className="text-foreground">{email}</span>.
+            {mode === "forgot" ? " Abra o e-mail para criar uma nova senha." : " Confirme para acessar sua conta."}
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3.5">
@@ -145,24 +160,36 @@ const AuthPage = () => {
               autoComplete="email"
               className="w-full rounded-xl border border-border bg-background/40 px-4 py-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/10"
             />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Senha"
-              maxLength={72}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              className="w-full rounded-xl border border-border bg-background/40 px-4 py-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/10"
-            />
+            {mode !== "forgot" && (
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Senha"
+                maxLength={72}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                className="w-full rounded-xl border border-border bg-background/40 px-4 py-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            )}
+            {mode === "login" && (
+              <button type="button" onClick={() => { setMode("forgot"); setEmailSent(false); }} className="block text-sm font-semibold text-primary hover:underline">
+                Esqueci minha senha
+              </button>
+            )}
             <button
               type="submit"
               disabled={submitting}
               className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-display font-bold text-primary-foreground shadow-[var(--shadow-glow)] transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
             >
               {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-              {mode === "login" ? "Entrar" : "Criar conta"} {!submitting && <ArrowRight className="h-4 w-4" />}
+              {mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Enviar link"} {!submitting && <ArrowRight className="h-4 w-4" />}
             </button>
           </form>
+        )}
+        {mode === "forgot" && (
+          <button type="button" onClick={() => { setMode("login"); setEmailSent(false); }} className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> Voltar para o login
+          </button>
         )}</div>
         {mode === "login" && !emailSent && (
           <button

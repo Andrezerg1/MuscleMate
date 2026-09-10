@@ -13,6 +13,7 @@ import Analysis from "./pages/Analysis";
 import About from "./pages/About";
 import Auth from "./pages/Auth";
 import Profile from "./pages/Profile";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ const App = () => (
             />
             <Route path="/sobre" element={<About />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/redefinir-senha" element={<ResetPassword />} />
             <Route
               path="/perfil"
               element={
