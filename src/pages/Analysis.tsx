@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Camera, CameraOff, AlertTriangle, CheckCircle2, XCircle, Loader2, Play, Square, Eye, ClipboardList, X } from "lucide-react";
 import { exercises } from "@/lib/exercises";
+import { CurlCounter } from '@/lib/curlCounter';
 import {
   type FeedbackResult,
   exerciseAnalyzers,
@@ -63,6 +64,7 @@ const AnalysisPage = () => {
   const [depth, setDepth] = useState(0);
   const [position, setPosition] = useState<PositionCheck | null>(null);
   const repCounterRef = useRef(new RepCounter(exercises[0].id));
+  const curlCounterRef = useRef(new CurlCounter());
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const detectorRef = useRef<PoseDetector | null>(null);
@@ -96,6 +98,7 @@ const AnalysisPage = () => {
   useEffect(() => {
     selectedExerciseRef.current = selectedExercise;
     repCounterRef.current.reset(selectedExercise.id);
+    curlCounterRef.current.reset();
     setPhase("top");
     setDepth(0);
     setPosition(null);
@@ -110,6 +113,7 @@ const AnalysisPage = () => {
     setRepCount(0);
     repFeedbacksRef.current = [];
     repCounterRef.current.reset(selectedExerciseRef.current.id);
+    curlCounterRef.current.reset();
     setPhase("top");
     setDepth(0);
     statsRef.current = { reps: 0, correct: 0, warning: 0, error: 0 };
@@ -124,6 +128,7 @@ const AnalysisPage = () => {
     issuesRef.current = {};
     setRepCount(0);
     repCounterRef.current.reset(selectedExerciseRef.current.id);
+    curlCounterRef.current.reset();
     setPhase("top");
     setDepth(0);
     repFeedbacksRef.current = [];
@@ -322,19 +327,25 @@ const AnalysisPage = () => {
           // Analyze exercise
           const analyzer = exerciseAnalyzers[selectedExerciseRef.current.id];
           if (analyzer) {
-            const result = analyzer(keypoints);
+            const curl = selectedExerciseRef.current.id === 'bicep-curl' ? curlCounterRef.current.update(keypoints) : null;
+            const result = curl ? curl.feedback : analyzer(keypoints);
             if (result) {
               setFeedback(result);
               drawFeedbackOverlay(ctx, result);
 
               // Rep state machine (hysteresis + smoothing)
-              const rep = repCounterRef.current.update(result.angle);
+              const rep = curl ? curl.rep : repCounterRef.current.update(result.angle);
               setPhase(rep.phase);
               setDepth(rep.progress);
 
               // Collect feedback belonging to the current rep
-              if (rep.phase !== "top" || rep.reachedBottom) {
+              if (!curl && (rep.phase !== "top" || rep.reachedBottom)) {
                 repFeedbacksRef.current.push(result);
+              }
+
+              if (curl?.rejected && seriesActiveRef.current) {
+                statsRef.current.error++;
+                issuesRef.current[result.message] = (issuesRef.current[result.message] ?? 0) + 1;
               }
 
               if (rep.repCompleted && seriesActiveRef.current) {
@@ -373,10 +384,12 @@ const AnalysisPage = () => {
             }
           }
         } else if (positionCheckers[selectedExerciseRef.current.id]) {
+          curlCounterRef.current.reset();
           setPosition(positionCheckers[selectedExerciseRef.current.id](null));
           positionOkRef.current = false;
         }
       } catch {
+        curlCounterRef.current.reset();
         // Silently continue on detection errors
       }
 
@@ -451,6 +464,9 @@ const AnalysisPage = () => {
   }
 
   const phaseLabel =
+    selectedExercise.id === 'bicep-curl'
+      ? phase === 'top' ? 'Braço estendido' : phase === 'descending' ? 'Contraindo' : 'Retornando à extensão'
+      :
     phase === "top"
       ? "Topo"
       : phase === "descending"

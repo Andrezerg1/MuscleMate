@@ -31,12 +31,12 @@ export const exercises: Exercise[] = [
     nameEn: "Bicep Curl",
     description: "Exercício isolado para bíceps. Requer controle do cotovelo junto ao tronco.",
     landmarks: ["Ombro", "Cotovelo", "Pulso"],
-    correctCriteria: "Perfil para a câmera; cotovelo alinhado à linha escapular; contrair até o cotovelo passar de 90°",
+    correctCriteria: "De perfil, comece com o braço estendido; contraia sem elevar ombro ou cotovelo e volte à extensão para completar a repetição",
     commonErrors: [
       { error: "Cotovelo à frente da linha escapular", feedback: "Mantenha o cotovelo alinhado ao ombro" },
-      { error: "Amplitude incompleta", feedback: "Contraia até passar de 90°" },
+      { error: "Amplitude incompleta", feedback: "Complete a contração e retorne ao braço estendido" },
     ],
-    angleRange: { min: 30, max: 90, joint: "Cotovelo" },
+    angleRange: { min: 25, max: 45, joint: "Cotovelo" },
     cameraPosition: "Fique de perfil (de lado) para a câmera, com ombro, cotovelo e punho visíveis",
   },
   {
