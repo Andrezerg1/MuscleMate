@@ -17,13 +17,13 @@ export const exercises: Exercise[] = [
     nameEn: "Squat",
     description: "Exercício composto que trabalha quadríceps, glúteos e core. Fundamental para força de membros inferiores.",
     landmarks: ["Quadril", "Joelho", "Tornozelo"],
-    correctCriteria: "Execução lateralizada; joelho alinhado com o pé; ângulo joelho 90°±10° na descida; coluna neutra",
+    correctCriteria: "De frente: acompanhe os joelhos entrando para dentro. De lado: desça até cerca de 90° (margem de 10°), controle o tronco e volte à posição em pé",
     commonErrors: [
       { error: "Joelho para dentro (valgo)", feedback: "Empurre os joelhos para fora" },
       { error: "Amplitude incompleta", feedback: "Desça mais, paralelo ao chão" },
     ],
-    angleRange: { min: 80, max: 100, joint: "Joelho" },
-    cameraPosition: "Posicione-se de perfil para a câmera",
+    angleRange: { min: 90, max: 100, joint: "Joelho (de lado)" },
+    cameraPosition: "Escolha De frente para alinhamento dos joelhos ou De lado para amplitude",
   },
   {
     id: "bicep-curl",

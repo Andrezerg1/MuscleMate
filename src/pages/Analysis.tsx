@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Camera, CameraOff, AlertTriangle, CheckCircle2, XCircle, Loader2, Play, Square, Eye, ClipboardList, X } from "lucide-react";
 import { exercises } from "@/lib/exercises";
 import { CurlCounter } from '@/lib/curlCounter';
+import { SquatCounter, SQUAT_VIEWS, checkSquatView, type SquatView } from '@/lib/squatCounter';
 import {
   type FeedbackResult,
   exerciseAnalyzers,
@@ -55,6 +56,11 @@ const AnalysisPage = () => {
   const [modelReady, setModelReady] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
   const [selectedExercise, setSelectedExercise] = useState(exercises[0]);
+  const [squatView, setSquatView] = useState<SquatView>('side');
+  const squatViewRef = useRef<SquatView>('side');
+  const squatCounterRef = useRef(new SquatCounter());
+  const squatEpochRef = useRef(0);
+  const [squatMetric, setSquatMetric] = useState('Aguardando enquadramento');
   const [feedback, setFeedback] = useState<FeedbackResult | null>(null);
   const [repCount, setRepCount] = useState(0);
   const [fps, setFps] = useState(0);
@@ -99,6 +105,9 @@ const AnalysisPage = () => {
     selectedExerciseRef.current = selectedExercise;
     repCounterRef.current.reset(selectedExercise.id);
     curlCounterRef.current.reset();
+    squatCounterRef.current.reset(squatViewRef.current);
+    squatEpochRef.current++;
+    setFeedback(null);
     setPhase("top");
     setDepth(0);
     setPosition(null);
@@ -109,11 +118,14 @@ const AnalysisPage = () => {
   }, [seriesActive]);
 
   const resetSeriesState = useCallback(() => {
+    seriesActiveRef.current = false;
     setSeriesActive(false);
     setRepCount(0);
     repFeedbacksRef.current = [];
     repCounterRef.current.reset(selectedExerciseRef.current.id);
     curlCounterRef.current.reset();
+    squatCounterRef.current.reset(squatViewRef.current);
+    squatEpochRef.current++;
     setPhase("top");
     setDepth(0);
     statsRef.current = { reps: 0, correct: 0, warning: 0, error: 0 };
@@ -129,18 +141,22 @@ const AnalysisPage = () => {
     setRepCount(0);
     repCounterRef.current.reset(selectedExerciseRef.current.id);
     curlCounterRef.current.reset();
+    squatCounterRef.current.reset(squatViewRef.current);
+    squatEpochRef.current++;
     setPhase("top");
     setDepth(0);
     repFeedbacksRef.current = [];
     statsRef.current = { reps: 0, correct: 0, warning: 0, error: 0 };
     seriesStartRef.current = Date.now();
     setSeriesActive(true);
+    seriesActiveRef.current = true;
   }, []);
 
   const stopSeries = useCallback(async () => {
     const stats = { ...statsRef.current };
     const wasActive = seriesActiveRef.current;
     const exercise = selectedExerciseRef.current;
+    const exerciseName = exercise.id === 'squat' ? `${exercise.name} — ${SQUAT_VIEWS[squatViewRef.current].title}` : exercise.name;
     const issues = { ...issuesRef.current };
     const duration = seriesStartRef.current
       ? Math.round((Date.now() - seriesStartRef.current) / 1000)
@@ -168,7 +184,7 @@ const AnalysisPage = () => {
     }
 
     setReport({
-      exerciseName: exercise.name,
+      exerciseName,
       reps: stats.reps,
       correct: stats.correct,
       warning: stats.warning,
@@ -185,7 +201,7 @@ const AnalysisPage = () => {
     const { error } = await supabase.from("workout_sessions").insert({
       user_id: user.id,
       exercise_id: exercise.id,
-      exercise_name: exercise.name,
+      exercise_name: exerciseName,
       reps: stats.reps,
       correct_reps: stats.correct,
       warning_reps: stats.warning,
@@ -272,6 +288,8 @@ const AnalysisPage = () => {
   }, [loadModel]);
 
   const stopCamera = useCallback(() => {
+    squatCounterRef.current.reset(squatViewRef.current);
+    squatEpochRef.current++;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraActive(false);
@@ -308,13 +326,21 @@ const AnalysisPage = () => {
       ctx.restore();
 
       try {
+        const exerciseId = selectedExerciseRef.current.id;
+        const squatEpoch = squatEpochRef.current;
         const poses = await detector.estimatePoses(video);
+        if (exerciseId !== selectedExerciseRef.current.id || squatEpoch !== squatEpochRef.current) {
+          animFrameRef.current = requestAnimationFrame(detect);
+          return;
+        }
 
         if (poses.length > 0 && poses[0].keypoints) {
           const keypoints = poses[0].keypoints;
           drawSkeleton(ctx, keypoints, canvas.width);
 
-          const checker = positionCheckers[selectedExerciseRef.current.id];
+          const checker = exerciseId === 'squat'
+            ? (points: Keypoint[] | null) => checkSquatView(points, squatViewRef.current)
+            : positionCheckers[exerciseId];
           if (checker) {
             const check = checker(keypoints);
             setPosition(check);
@@ -328,22 +354,29 @@ const AnalysisPage = () => {
           const analyzer = exerciseAnalyzers[selectedExerciseRef.current.id];
           if (analyzer) {
             const curl = selectedExerciseRef.current.id === 'bicep-curl' ? curlCounterRef.current.update(keypoints) : null;
-            const result = curl ? curl.feedback : analyzer(keypoints);
+            const squat = exerciseId === 'squat' ? squatCounterRef.current.update(keypoints) : null;
+            const tracked = squat ?? curl;
+            if (squat) {
+              setPosition(squat.position);
+              positionOkRef.current = squat.position.ready;
+              setSquatMetric(squat.metric);
+            }
+            const result = tracked ? tracked.feedback : analyzer(keypoints);
             if (result) {
               setFeedback(result);
-              drawFeedbackOverlay(ctx, result);
+              drawFeedbackOverlay(ctx, result, squat?.metric);
 
               // Rep state machine (hysteresis + smoothing)
-              const rep = curl ? curl.rep : repCounterRef.current.update(result.angle);
+              const rep = tracked ? tracked.rep : repCounterRef.current.update(result.angle);
               setPhase(rep.phase);
               setDepth(rep.progress);
 
               // Collect feedback belonging to the current rep
-              if (!curl && (rep.phase !== "top" || rep.reachedBottom)) {
+              if (!tracked && (rep.phase !== "top" || rep.reachedBottom)) {
                 repFeedbacksRef.current.push(result);
               }
 
-              if (curl?.rejected && seriesActiveRef.current) {
+              if (tracked?.rejected && seriesActiveRef.current) {
                 statsRef.current.error++;
                 issuesRef.current[result.message] = (issuesRef.current[result.message] ?? 0) + 1;
               }
@@ -364,9 +397,10 @@ const AnalysisPage = () => {
                     (issuesRef.current[errors[0].message] ?? 0) + 1;
                   statsRef.current.error++;
                 } else {
-                  if (warnings.length > 3) {
-                    issuesRef.current[warnings[0].message] =
-                      (issuesRef.current[warnings[0].message] ?? 0) + 1;
+                  if (squat?.warning || warnings.length > 3) {
+                    const warningMessage = squat?.warning || warnings[0].message;
+                    issuesRef.current[warningMessage] =
+                      (issuesRef.current[warningMessage] ?? 0) + 1;
                     statsRef.current.warning++;
                   } else {
                     statsRef.current.correct++;
@@ -385,11 +419,16 @@ const AnalysisPage = () => {
           }
         } else if (positionCheckers[selectedExerciseRef.current.id]) {
           curlCounterRef.current.reset();
-          setPosition(positionCheckers[selectedExerciseRef.current.id](null));
+          squatCounterRef.current.reset(squatViewRef.current);
+          setPosition(exerciseId === 'squat' ? checkSquatView(null, squatViewRef.current) : positionCheckers[exerciseId](null));
+          if (exerciseId === 'squat') {
+            setFeedback(null); setPhase('top'); setDepth(0); setSquatMetric('Aguardando enquadramento');
+          }
           positionOkRef.current = false;
         }
       } catch {
         curlCounterRef.current.reset();
+        squatCounterRef.current.reset(squatViewRef.current);
         // Silently continue on detection errors
       }
 
@@ -443,24 +482,24 @@ const AnalysisPage = () => {
     }
   }
 
-  function drawFeedbackOverlay(ctx: CanvasRenderingContext2D, fb: FeedbackResult) {
+  function drawFeedbackOverlay(ctx: CanvasRenderingContext2D, fb: FeedbackResult, metric?: string) {
     const color =
       fb.level === "correct" ? "#22c55e" : fb.level === "warning" ? "#eab308" : "#ef4444";
 
     // Background bar
     ctx.fillStyle = "rgba(14, 16, 20, 0.75)";
-    ctx.fillRect(0, 0, 400, 50);
+    ctx.fillRect(0, 0, ctx.canvas.width, 50);
 
     ctx.fillStyle = color;
     ctx.font = "bold 22px 'Space Grotesk', sans-serif";
-    ctx.fillText(`${fb.joint}: ${Math.round(fb.angle)}°`, 15, 33);
+    ctx.fillText(metric || `${fb.joint}: ${Math.round(fb.angle)}°`, 15, 33, Math.max(1, ctx.canvas.width - 30));
 
     ctx.fillStyle = "rgba(14, 16, 20, 0.75)";
-    ctx.fillRect(0, 50, 500, 35);
+    ctx.fillRect(0, 50, ctx.canvas.width, 35);
 
     ctx.fillStyle = color;
     ctx.font = "16px 'Inter', sans-serif";
-    ctx.fillText(fb.message, 15, 72);
+    ctx.fillText(fb.message, 15, 72, Math.max(1, ctx.canvas.width - 30));
   }
 
   const phaseLabel =
@@ -468,7 +507,7 @@ const AnalysisPage = () => {
       ? phase === 'top' ? 'Braço estendido' : phase === 'descending' ? 'Contraindo' : 'Retornando à extensão'
       :
     phase === "top"
-      ? "Topo"
+      ? selectedExercise.id === 'squat' ? 'Em pé' : "Topo"
       : phase === "descending"
         ? "Descendo"
         : phase === "bottom"
@@ -521,6 +560,33 @@ const AnalysisPage = () => {
           </div>
         </div>
 
+        {selectedExercise.id === 'squat' && (
+          <section aria-label="Posição da câmera para o agachamento" className="mb-5 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(['front', 'side'] as const).map(view => (
+                <button key={view} type="button" aria-pressed={squatView === view}
+                  disabled={seriesActive || savingSeries}
+                  onClick={() => {
+                    squatViewRef.current = view;
+                    squatCounterRef.current.reset(view);
+                    squatEpochRef.current++;
+                    setSquatView(view); setFeedback(null); setPosition(null); setPhase('top'); setDepth(0);
+                    setSquatMetric('Aguardando enquadramento'); positionOkRef.current = false;
+                  }}
+                  className={`rounded-2xl border p-4 text-left transition-colors disabled:cursor-not-allowed ${squatView === view ? 'border-primary/60 bg-primary/10' : 'border-border bg-card hover:border-primary/30'}`}>
+                  <span className="flex items-center justify-between gap-2 font-display font-bold">
+                    {SQUAT_VIEWS[view].title}{squatView === view && <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-primary" />}
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold text-primary">{SQUAT_VIEWS[view].focus}</span>
+                  <span className="mt-2 block text-xs leading-relaxed text-muted-foreground">{SQUAT_VIEWS[view].description}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">{SQUAT_VIEWS[squatView].limitation}</p>
+            {seriesActive && <p className="text-xs text-muted-foreground">Finalize a série para trocar a posição da câmera.</p>}
+          </section>
+        )}
+
         <div className="space-y-5">
           {/* Video feed */}
           <div className="relative rounded-3xl border border-border bg-card overflow-hidden aspect-[3/4] sm:aspect-video shadow-2xl shadow-black/20">
@@ -560,7 +626,7 @@ const AnalysisPage = () => {
                       <Camera className="w-8 h-8 text-primary" />
                     </div>
                     <p className="text-muted-foreground text-sm px-6 text-center">
-                      {selectedExercise.cameraPosition}
+                      {selectedExercise.id === 'squat' ? SQUAT_VIEWS[squatView].instruction : selectedExercise.cameraPosition}
                     </p>
                     {cameraError && <p className="max-w-sm px-6 text-center text-xs text-danger">{cameraError}</p>}
                   </>
@@ -605,7 +671,7 @@ const AnalysisPage = () => {
                   <div>
                     <p className="font-semibold text-sm leading-snug">{feedback.message}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {feedback.joint} {Math.round(feedback.angle)}°
+                      {selectedExercise.id === 'squat' ? squatMetric : `${feedback.joint} ${Math.round(feedback.angle)}°`}
                     </p>
                   </div>
                 </div>
@@ -617,7 +683,7 @@ const AnalysisPage = () => {
             </div>
 
             <div className="rounded-2xl border border-primary/20 bg-primary/[0.07] p-4 text-center">
-              <p className="text-[10px] text-muted-foreground font-bold tracking-[0.14em]">REPS</p>
+              <p className="text-[10px] text-muted-foreground font-bold tracking-[0.14em]">{selectedExercise.id === 'squat' && squatView === 'front' ? 'CICLOS ALINHADOS' : 'REPS'}</p>
               <p className="font-display text-3xl font-extrabold text-primary leading-tight">
                 {repCount}
               </p>
