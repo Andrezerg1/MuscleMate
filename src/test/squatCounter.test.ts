@@ -41,8 +41,8 @@ describe('lateral squat: standing → depth → standing', () => {
   it('does not count when beginning already crouched', () => expect(run(cycle().slice(9)).some(r=>r.rep.repCompleted)).toBe(false));
   it('rejects a partial descent', () => expect(run([175,150,120,110,120,150,175].flatMap(a=>repeat(sidePose(a)))).filter(r=>r.rejected)).toHaveLength(1));
   it('does not count at depth or before full extension', () => expect(run(cycle().slice(0,-3)).some(r=>r.rep.repCompleted)).toBe(false));
-  it('allows 10° depth tolerance and deeper squats', () => {
-    for (const depth of [100,90,65]) expect(run([175,150,120,depth,120,150,175].flatMap(a=>repeat(sidePose(a)))).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+  it('allows 15° depth tolerance and deeper squats', () => {
+    for (const depth of [105,100,90,65]) expect(run([175,150,120,depth,120,150,175].flatMap(a=>repeat(sidePose(a)))).filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
   it('rejects sustained excessive forward trunk lean, even if corrected', () => {
     const result = run(angles.flatMap(a=>repeat(sidePose(a,a===85?78:15))));
@@ -65,13 +65,33 @@ describe('lateral squat: standing → depth → standing', () => {
     p[10] = sidePose(90);
     expect(run(p).some(r=>r.rep.repCompleted)).toBe(false);
   });
-  it('losing detection discards the current attempt', () => {
+  it('tolerates a single missing detection without inventing a repetition', () => {
     const p: (Keypoint[] | null)[] = cycle(); p[14] = null;
-    expect(run(p).some(r=>r.rep.repCompleted)).toBe(false);
+    const result = run(p);
+    expect(result[14].rep.repCompleted).toBe(false);
+    expect(result.filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
   it('does not switch to the other leg mid-rep', () => {
-    const p = cycle(); p[14] = p[14].map((v,i)=>i===14?{...v,score:0.1}:v);
+    const p = cycle();
+    for (let j=12;j<18;j++) p[j] = p[j].map((v,i)=>i===14?{...v,score:0.1}:v);
     expect(run(p).some(r=>r.rep.repCompleted)).toBe(false);
+  });
+  it('accepts a relaxed return without locking the knees', () => {
+    expect(run([158,140,120,105,90,120,140,158].flatMap(a=>repeat(sidePose(a)))).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+  });
+  it('accepts profile tracking when the far shoulder is occluded', () => {
+    const frames = cycle().map(p=>p.map((v,i)=>i===5?{...v,score:0.15}:v));
+    expect(run(frames).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+  });
+  it('accepts usable keypoints below the old confidence cutoff', () => {
+    const frames = cycle().map(p=>p.map(v=>({...v,score:0.45})));
+    expect(run(frames).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+  });
+  it('keeps cues stable and the result visible at rest', () => {
+    const result = run([...cycle(),...repeat(sidePose(175),5)]);
+    expect(new Set(result.slice(6,9).map(r=>r.feedback.message)).size).toBe(1);
+    expect(result.slice(26).every(r=>r.feedback.message==='Agachamento completo! ✓')).toBe(true);
+    expect(result.every(r=>r.feedback.message.trim().length>0)).toBe(true);
   });
   it.each([0.6,1,1.7])('is independent of image scale %s and mirroring', scale => {
     for (const mirror of [1,-1]) {
@@ -125,7 +145,7 @@ describe('view and input validation', () => {
     expect(checkSquatView([],'side').ready).toBe(false);
     const p = frontPose(0); p[13].score=0.1;
     expect(checkSquatView(p,'front').ready).toBe(false);
-    p[5].x=NaN;
+    p[5].x=NaN; p[6].x=NaN;
     expect(new SquatCounter().update(p).position.ready).toBe(false);
   });
   it('resetting for another view clears the unfinished attempt', () => {

@@ -139,11 +139,8 @@ export function checkBicepCurlPosition(keypoints: Keypoint[] | null): PositionCh
   const torso = Math.max(1, Math.abs((ls.y + rs.y) / 2 - (lh.y + rh.y) / 2));
   const ratio = shoulderSpan / torso;
 
-  if (ratio > 0.75) {
+  if (ratio > 0.7) {
     return { ready: false, message: "Vire-se de lado para a câmera (visão de perfil)" };
-  }
-  if (ratio > 0.5) {
-    return { ready: false, message: "Quase lá — gire mais o corpo até ficar totalmente de perfil" };
   }
   return { ready: true, message: "Perfil correto — pode iniciar a série" };
 }

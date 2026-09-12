@@ -3,9 +3,10 @@
 ## Comportamento
 
 - **De frente:** observa cada joelho em relação à linha quadril–tornozelo e à posição inicial. Sinaliza deslocamento medial persistente; não diagnostica valgo tridimensional. Conta ciclos de descida e subida com alinhamento frontal, sem afirmar profundidade de 90°.
-- **De lado:** mede flexão projetada do joelho, espera início em pé, descida até 100° ou menos (alvo 90° com margem de 10°) e retorno a pelo menos 165°, com quadril/tronco novamente em pé. Profundidades maiores não são rejeitadas automaticamente.
+- **De lado:** mede flexão projetada do joelho, espera início em pé, descida até 105° ou menos (alvo 90° com margem de 15°) e retorno a pelo menos 155°, com quadril/tronco novamente em pé. Profundidades maiores não são rejeitadas automaticamente.
 - A vista é fixa durante a série. Relatório e histórico identificam De frente/De lado pelo nome do exercício, mantendo o ID `squat` e o banco existente.
-- O contador reinicia na troca de exercício/vista/série, parada da câmera, perda de pontos necessários, orientação incorreta ou interrupção de frames. Frames em voo de uma configuração anterior são ignorados.
+- O contador reinicia na troca de exercício/vista/série, parada da câmera ou ausência de amostras válidas por mais de 350 ms. Uma perda breve pausa a avaliação sem contar nem acumular permanência no fundo. Frames em voo de uma configuração anterior são ignorados.
+- Feedback em um único painel: início, retorno e resultado estáveis. Desvios persistentes são informados ao concluir a tentativa, sem sobreposição na câmera ou números oscilando a cada quadro.
 
 ## Tolerâncias iniciais de câmera
 
@@ -14,7 +15,7 @@ Os valores em `src/lib/squatCounter.ts` são heurísticas ajustáveis, não limi
 - Posição em pé: pelo menos duas observações durante 150 ms; fundo: 80 ms; desvio persistente: 180 ms. A máquina mantém o erro até terminar a tentativa.
 - Ciclo lateral entre 600 ms e 20 s; intervalo entre frames maior que 350 ms exige nova posição inicial.
 - Medialização frontal: diferença em relação à posição inicial normalizada pelo comprimento projetado da perna (aviso >4,5%, rejeição >8%). Pernas avaliadas independentemente, considerando espelhamento.
-- Frente: descida vertical do quadril relativa ao tornozelo, normalizada pela perna inicial. Saída da posição inicial: 8%; ciclo observado: 18%; retorno: até 4%. Esses números detectam movimento, não estimam a flexão sagital.
+- Frente: descida vertical do quadril relativa ao tornozelo, normalizada pela perna inicial. Saída da posição inicial: 8%; ciclo observado: 16%; retorno: até 6%. Esses números detectam movimento, não estimam a flexão sagital.
 - Inclinação lateral do tronco: aviso acima de 55°, rejeição persistente acima de 70° ou para trás acima de 25°. O retorno exige alinhamento próximo ao inicial.
 - Avanço horizontal joelho–tornozelo superior a 65% da canela inicial gera orientação, não rejeição automática. Mobilidade e proporções corporais influenciam esse avanço.
 

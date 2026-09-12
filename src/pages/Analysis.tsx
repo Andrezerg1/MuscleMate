@@ -364,7 +364,7 @@ const AnalysisPage = () => {
             const result = tracked ? tracked.feedback : analyzer(keypoints);
             if (result) {
               setFeedback(result);
-              drawFeedbackOverlay(ctx, result, squat?.metric);
+              if (!tracked) drawFeedbackOverlay(ctx, result);
 
               // Rep state machine (hysteresis + smoothing)
               const rep = tracked ? tracked.rep : repCounterRef.current.update(result.angle);
@@ -419,10 +419,10 @@ const AnalysisPage = () => {
           }
         } else if (positionCheckers[selectedExerciseRef.current.id]) {
           curlCounterRef.current.reset();
-          squatCounterRef.current.reset(squatViewRef.current);
+          const missingSquat = exerciseId === 'squat' ? squatCounterRef.current.update(null) : null;
           setPosition(exerciseId === 'squat' ? checkSquatView(null, squatViewRef.current) : positionCheckers[exerciseId](null));
           if (exerciseId === 'squat') {
-            setFeedback(null); setPhase('top'); setDepth(0); setSquatMetric('Aguardando enquadramento');
+            setFeedback(missingSquat!.feedback); setPhase(missingSquat!.rep.phase); setDepth(missingSquat!.rep.progress); setSquatMetric('Aguardando enquadramento');
           }
           positionOkRef.current = false;
         }
@@ -670,9 +670,9 @@ const AnalysisPage = () => {
                   <FeedbackIcon className="w-5 h-5 shrink-0 mt-0.5" />
                   <div>
                     <p className="font-semibold text-sm leading-snug">{feedback.message}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    {!['bicep-curl', 'squat'].includes(selectedExercise.id) && <p className="text-xs text-muted-foreground mt-0.5">
                       {selectedExercise.id === 'squat' ? squatMetric : `${feedback.joint} ${Math.round(feedback.angle)}°`}
-                    </p>
+                    </p>}
                   </div>
                 </div>
               ) : (
@@ -697,7 +697,7 @@ const AnalysisPage = () => {
             </div>
           </div>
 
-          {cameraActive && position && (
+          {cameraActive && position && !['bicep-curl', 'squat'].includes(selectedExercise.id) && (
             <div
               className={`flex items-start gap-2 rounded-2xl border px-4 py-3 text-xs ${
                 position.ready

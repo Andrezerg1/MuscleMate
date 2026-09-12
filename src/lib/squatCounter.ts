@@ -13,40 +13,44 @@ export const SQUAT_VIEWS = {
     title: 'De lado', focus: 'Amplitude do movimento',
     description: 'Acompanha a profundidade, o retorno à posição em pé e a inclinação do tronco.',
     instruction: 'Fique de perfil, comece em pé e enquadre ombro, quadril, joelho e tornozelo.',
-    limitation: 'Busque cerca de 90° no joelho (margem de 10°) e volte à extensão, sem travar os joelhos. A câmera estima o tronco, mas não confirma a curvatura da lombar nem o apoio do calcanhar.',
+    limitation: 'Busque cerca de 90° no joelho (margem de 15°) e volte à extensão, sem travar os joelhos. A câmera estima o tronco, mas não confirma a curvatura da lombar nem o apoio do calcanhar.',
   },
 } as const;
 
 // Initial camera heuristics: proportional to the athlete, not clinical cutoffs.
 // Front-view projected knee angles are NOT sagittal flexion measurements.
 export const SQUAT_LIMITS = {
-  extension: 165, departure: 155, depth: 100,
+  extension: 155, departure: 145, depth: 105,
   standingMs: 150, depthMs: 80, faultMs: 180,
   minRepMs: 600, maxRepMs: 20000, maxGapMs: 350,
-  frontalDeparture: 0.08, frontalDepth: 0.18, frontalReturn: 0.04,
+  frontalDeparture: 0.08, frontalDepth: 0.16, frontalReturn: 0.06,
   valgusWarning: 0.045, valgusError: 0.08,
   torsoWarning: 55, torsoError: 70, backwardError: 25,
 };
 const SIDES = [[6, 12, 14, 16], [5, 11, 13, 15]];
 const valid = (p: Keypoint[] | null, ids: number[]) => ids.every(i =>
-  p?.[i] && Number.isFinite(p[i].x) && Number.isFinite(p[i].y) && (p[i].score ?? 0) >= 0.5);
+  p?.[i] && Number.isFinite(p[i].x) && Number.isFinite(p[i].y) && (p[i].score ?? 0) >= 0.35);
 const distance = (a: Keypoint, b: Keypoint) => Math.hypot(a.x - b.x, a.y - b.y);
 const angleAt = (a: Keypoint, b: Keypoint, c: Keypoint) => calculateAngle([a.x, a.y], [b.x, b.y], [c.x, c.y]);
 const average = (a: number, b: number) => (a + b) / 2;
 
 export function checkSquatView(p: Keypoint[] | null, view: SquatView): PositionCheck {
   if (!p) return { ready: false, message: 'Entre no enquadramento e comece em pé' };
-  if (!valid(p, [5, 6, 11, 12])) return { ready: false, message: 'Enquadre os ombros e o quadril com boa iluminação' };
+  if (!valid(p, [5, 6, 11, 12])) {
+    // In profile the far shoulder/hip can be occluded. A complete near-side chain is sufficient.
+    if (view === 'side' && SIDES.some(ids => valid(p, ids))) return { ready: true, message: 'De lado: braço e perna visíveis' };
+    return { ready: false, message: 'Enquadre os ombros e o quadril com boa iluminação' };
+  }
   const torso = average(distance(p[5], p[11]), distance(p[6], p[12]));
   if (torso < 20) return { ready: false, message: 'Aproxime-se da câmera, mantendo o corpo inteiro visível' };
   const ratio = distance(p[5], p[6]) / torso;
   if (view === 'front') {
     if (!valid(p, [13, 14, 15, 16])) return { ready: false, message: 'Mostre os dois joelhos e os dois tornozelos' };
-    if (ratio < 0.55) return { ready: false, message: 'Vire de frente para avaliar os dois joelhos' };
+    if (ratio < 0.45) return { ready: false, message: 'Vire de frente para avaliar os dois joelhos' };
     if (Math.abs(p[15].x - p[16].x) < torso * 0.15) return { ready: false, message: 'Deixe os dois tornozelos visíveis, sem sobreposição' };
   } else {
     if (!SIDES.some(ids => valid(p, ids))) return { ready: false, message: 'Mostre ombro, quadril, joelho e tornozelo do mesmo lado' };
-    if (ratio > 0.5) return { ready: false, message: 'Vire de lado para avaliar a amplitude' };
+    if (ratio > 0.7) return { ready: false, message: 'Vire de lado para avaliar a amplitude' };
   }
   return { ready: true, message: `${SQUAT_VIEWS[view].title}: posição da câmera correta` };
 }
@@ -81,6 +85,8 @@ export class SquatCounter {
   private lastFrame: number | null = null;
   private progress = 0;
   private phase: RepPhase = 'top';
+  private endMessage = '';
+  private endLevel: FeedbackResult['level'] = 'correct';
   private holds = new Map<string, { since: number; frames: number }>();
 
   constructor(view: SquatView = 'side') { this.view = view; }
@@ -88,6 +94,7 @@ export class SquatCounter {
     this.view = view; this.side = null; this.baseline = null; this.active = false;
     this.reachedDepth = false; this.invalid = ''; this.warning = null;
     this.started = 0; this.lastFrame = null; this.progress = 0; this.phase = 'top'; this.holds.clear();
+    this.endMessage = ''; this.endLevel = 'correct';
   }
   private held(key: string, condition: boolean, now: number, duration: number) {
     if (!condition) { this.holds.delete(key); return false; }
@@ -125,18 +132,18 @@ export class SquatCounter {
   update(p: Keypoint[] | null, now = Date.now()): SquatUpdate {
     const position = checkSquatView(p, this.view);
     if (this.lastFrame !== null && (now-this.lastFrame > SQUAT_LIMITS.maxGapMs || now < this.lastFrame)) this.reset();
-    this.lastFrame = now;
     const s = position.ready && p ? this.sample(p) : null;
     if (!s || s.leg < 30 || s.shin < 15 || !Number.isFinite(s.knee)) {
-      this.reset();
+      this.holds.clear();
       const missing = position.ready ? { ready: false, message: 'Mantenha o mesmo lado visível e volte à posição em pé' } : position;
       return this.output(null, missing, missing.message, 'warning');
     }
+    this.lastFrame = now;
     if (this.active && now-this.started > SQUAT_LIMITS.maxRepMs) {
       this.reset();
       return this.output(s, position, 'Movimento interrompido — volte à posição em pé', 'warning');
     }
-    const standingShape = s.knee >= SQUAT_LIMITS.extension && (this.view === 'front' || (s.hip >= 155 && Math.abs(s.lean) <= 25));
+    const standingShape = s.knee >= SQUAT_LIMITS.extension && (this.view === 'front' || (s.hip >= 140 && Math.abs(s.lean) <= 35));
     if (!this.baseline) {
       if (this.held('start', standingShape, now, SQUAT_LIMITS.standingMs)) this.baseline = s;
       return this.output(s, position, this.baseline ? 'Posição inicial registrada — pode agachar' : 'Fique em pé por um instante para começar', this.baseline ? 'correct' : 'warning');
@@ -149,6 +156,7 @@ export class SquatCounter {
     const departed = this.view === 'side' ? s.knee < SQUAT_LIMITS.departure : drop >= SQUAT_LIMITS.frontalDeparture;
     if (!this.active && departed) {
       this.active = true; this.started = now; this.reachedDepth = false; this.invalid = ''; this.warning = null; this.holds.clear();
+      this.endMessage = '';
     }
     const inward = Math.max(0,...s.inward.map((v,i) => v-base.inward[i]));
     const lean = Math.abs(s.lean);
@@ -167,20 +175,21 @@ export class SquatCounter {
       if (this.held('depth', deep, now, SQUAT_LIMITS.depthMs)) this.reachedDepth = true;
       this.phase = nextProgress < this.progress-0.015 ? 'ascending' : nextProgress > this.progress+0.015 ? 'descending' : this.phase;
       if (deep && this.phase !== 'ascending') this.phase = 'bottom';
-      const returned = standingShape && (this.view === 'side' ? Math.abs(s.lean-base.lean) <= 20 : drop <= SQUAT_LIMITS.frontalReturn);
+      const returned = standingShape && (this.view === 'side' ? Math.abs(s.lean-base.lean) <= 30 : drop <= SQUAT_LIMITS.frontalReturn);
       if (this.held('return', returned, now, SQUAT_LIMITS.standingMs)) {
         const completed = this.reachedDepth && !this.invalid && now-this.started >= SQUAT_LIMITS.minRepMs;
         const reason = this.invalid || (this.reachedDepth ? 'Movimento rápido demais para validar' : 'Movimento incompleto — complete a descida antes de subir');
         this.active = false; this.phase = 'top'; this.progress = 0; this.reachedDepth = false; this.holds.clear();
-        const result = this.output(s, position, completed ? this.view === 'front' ? 'Ciclo completo com alinhamento frontal validado' : 'Agachamento completo! ✓' : reason,
-          completed ? this.warning ? 'warning' : 'correct' : 'error', completed, !completed);
+        this.endMessage = completed ? this.warning || (this.view === 'front' ? 'Ciclo completo! ✓' : 'Agachamento completo! ✓') : reason;
+        this.endLevel = completed && !this.warning ? 'correct' : 'warning';
+        const result = this.output(s, position, this.endMessage, this.endLevel, completed, !completed);
         this.invalid = ''; this.warning = null;
         return result;
       }
     }
     this.progress = nextProgress;
-    return this.output(s, position, this.invalid || fault || advisory || (!this.active ? 'Em pé — inicie a descida' : this.reachedDepth ? 'Suba com controle até ficar em pé' : this.view === 'front' ? 'Desça mantendo os joelhos alinhados' : 'Desça com controle até cerca de 90°'),
-      this.invalid || fault ? 'error' : advisory ? 'warning' : 'correct');
+    return this.output(s, position, !this.active ? this.endMessage || 'Em pé — pode começar' : this.reachedDepth ? 'Volte a ficar em pé com controle' : 'Agache com controle',
+      this.active ? 'correct' : this.endLevel);
   }
   private output(s: SquatSample | null, position: PositionCheck, message: string, level: FeedbackResult['level'], completed = false, rejected = false): SquatUpdate {
     return { feedback: { angle: s?.knee ?? 180, joint: this.view === 'front' ? 'Joelho (projeção frontal)' : 'Joelho', message, level }, position,

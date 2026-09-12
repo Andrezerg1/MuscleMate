@@ -2,7 +2,7 @@ import type { Keypoint } from '@tensorflow-models/pose-detection';
 import { calculateAngle, checkBicepCurlPosition, type FeedbackResult, type RepUpdate } from './poseUtils';
 
 // Camera tolerances, not a clinical assessment of muscle relaxation.
-export const CURL_LIMITS = { extension: 165, departure: 155, peak: 45, minimum: 25, drift: 0.20, shoulderRise: 0.08, elbowRise: 0.12 };
+export const CURL_LIMITS = { extension: 155, departure: 140, peak: 60, drift: 0.32, shoulderRise: 0.18, elbowRise: 0.25, faultMs: 250, maxGapMs: 400 };
 type Sample = { angle: number; shoulderHeight: number; elbowHeight: number; torso: number; drift: number };
 export class CurlCounter {
   private side: number[] | null = null;
@@ -12,11 +12,18 @@ export class CurlCounter {
   private invalid = '';
   private extendedFrames = 0;
   private started = 0;
+  private faultSince: number | null = null;
+  private lastFrame: number | null = null;
+  private endMessage = '';
+  private endLevel: FeedbackResult['level'] = 'correct';
   reset() {
     this.side = null; this.baseline = null; this.active = false;
     this.peak = false; this.invalid = ''; this.extendedFrames = 0; this.started = 0;
+    this.faultSince = null; this.lastFrame = null; this.endMessage = ''; this.endLevel = 'correct';
   }
   update(points: Keypoint[] | null, now = Date.now()): { feedback: FeedbackResult; rep: RepUpdate; rejected: boolean } {
+    if (this.lastFrame !== null && (now < this.lastFrame || now-this.lastFrame > CURL_LIMITS.maxGapMs)) this.reset();
+    this.lastFrame = now;
     const visible = (indices: number[]) => indices.every(i => points?.[i] && (points[i].score ?? 0) >= 0.5 && Number.isFinite(points[i].x) && Number.isFinite(points[i].y));
     if (!points || !checkBicepCurlPosition(points).ready || (this.side && !visible(this.side))) {
       this.reset();
@@ -38,26 +45,38 @@ export class CurlCounter {
       if ((sample.shoulderHeight-this.baseline.shoulderHeight)/this.baseline.torso > CURL_LIMITS.shoulderRise) fault = 'Não eleve o ombro durante a rosca';
       if ((sample.elbowHeight-this.baseline.elbowHeight)/this.baseline.torso > CURL_LIMITS.elbowRise) fault = 'Não eleve o cotovelo durante a rosca';
     }
-    if (a < CURL_LIMITS.minimum) fault = 'Contração além do limite — controle a amplitude';
+    // Deep elbow flexion alone is not compensation: assess shoulder/elbow movement instead.
     if (this.active && now-this.started > 12000) { this.reset(); return this.output(a, 'Retorne à extensão para reiniciar', 'warning'); }
-    if (this.active && fault) this.invalid ||= fault;
+    if (this.active && fault) {
+      this.faultSince ??= now;
+      if (now-this.faultSince >= CURL_LIMITS.faultMs) this.invalid ||= fault;
+    } else this.faultSince = null;
     if (a >= CURL_LIMITS.extension && !fault) {
       this.extendedFrames++;
       if (this.extendedFrames >= 2) {
         const complete = this.active && this.peak && !this.invalid && now-this.started >= 500;
         const rejected = this.active && !complete;
         const reason = this.invalid || 'Amplitude incompleta — complete a contração';
+        if (this.active) {
+          this.endMessage = complete ? 'Repetição completa! ✓' : reason;
+          this.endLevel = rejected ? 'warning' : 'correct';
+        }
         this.active = false; this.peak = false; this.invalid = ''; this.baseline = sample;
-        return this.output(a, complete ? 'Repetição completa! ✓' : rejected ? reason : 'Braço estendido — inicie a contração', rejected ? 'error' : 'correct', complete, rejected);
+        this.faultSince = null;
+        return this.output(a, this.endMessage || 'Braço estendido — pode começar', this.endLevel, complete, rejected);
       }
     } else this.extendedFrames = 0;
-    if (!this.baseline) return this.output(a, fault || 'Estenda o braço e mantenha o ombro relaxado para começar', fault ? 'error' : 'warning');
-    if (!this.active && a < CURL_LIMITS.departure) { this.active = true; this.started = now; this.invalid = fault; }
-    if (this.active && a >= CURL_LIMITS.minimum && a <= CURL_LIMITS.peak) this.peak = true;
-    return this.output(a, this.invalid || fault || (this.peak ? 'Desça com controle até estender o braço' : 'Contraia mantendo ombro e cotovelo estáveis'), this.invalid || fault ? 'error' : 'correct');
+    if (!this.baseline) return this.output(a, 'Estenda o braço ao lado do corpo para começar', 'warning');
+    if (!this.active && a < CURL_LIMITS.departure) {
+      this.active = true; this.started = now; this.invalid = ''; this.endMessage = '';
+      this.faultSince = fault ? now : null;
+    }
+    if (this.active && a <= CURL_LIMITS.peak) this.peak = true;
+    // Stable stage cues: no per-frame corrective messages. Report sustained faults at the end.
+    return this.output(a, this.active ? this.peak ? 'Agora retorne com controle' : 'Faça a contração com controle' : this.endMessage || 'Braço estendido — pode começar', this.active ? 'correct' : this.endLevel);
   }
   private output(angle: number, message: string, level: FeedbackResult['level'], repCompleted = false, rejected = false) {
     return { feedback: { angle, message, level, joint: 'Cotovelo' }, rejected,
-      rep: { angle, repCompleted, phase: !this.active ? 'top' : this.peak ? 'ascending' : 'descending', progress: Math.max(0, Math.min(1, (165-angle)/120)), reachedBottom: this.peak } as RepUpdate };
+      rep: { angle, repCompleted, phase: !this.active ? 'top' : this.peak ? 'ascending' : 'descending', progress: Math.max(0, Math.min(1, (CURL_LIMITS.extension-angle)/(CURL_LIMITS.extension-CURL_LIMITS.peak))), reachedBottom: this.peak } as RepUpdate };
   }
 }
