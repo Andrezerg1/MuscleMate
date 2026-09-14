@@ -17,6 +17,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { buildSeriesReport, buildWorkoutReport, workoutNotes, type SeriesReport, type WorkoutReport } from '@/lib/workoutSession';
 
 import type { PoseDetector, Keypoint } from "@tensorflow-models/pose-detection";
 import * as tf from "@tensorflow/tfjs-core";
@@ -31,21 +32,9 @@ interface WorkoutSession {
   warning_reps: number;
   error_reps: number;
   duration_seconds: number;
+  notes: string | null;
   created_at: string;
 }
-
-interface SeriesReport {
-  exerciseName: string;
-  reps: number;
-  correct: number;
-  warning: number;
-  error: number;
-  duration: number;
-  accuracy: number;
-  summary: string;
-  points: { message: string; count: number }[];
-}
-
 
 const AnalysisPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -65,6 +54,11 @@ const AnalysisPage = () => {
   const [repCount, setRepCount] = useState(0);
   const [fps, setFps] = useState(0);
   const [report, setReport] = useState<SeriesReport | null>(null);
+  const [workoutReport, setWorkoutReport] = useState<WorkoutReport | null>(null);
+  const [plannedSeries, setPlannedSeries] = useState(3);
+  const [completedSeries, setCompletedSeries] = useState<SeriesReport[]>([]);
+  const completedSeriesRef = useRef<SeriesReport[]>([]);
+  const workoutStartRef = useRef(0);
   const [seriesActive, setSeriesActive] = useState(false);
   const [phase, setPhase] = useState<RepPhase>("top");
   const [depth, setDepth] = useState(0);
@@ -85,12 +79,13 @@ const AnalysisPage = () => {
   const { user } = useAuth();
   const [history, setHistory] = useState<WorkoutSession[]>([]);
   const [savingSeries, setSavingSeries] = useState(false);
+  const workoutInProgress = seriesActive || completedSeries.length > 0;
 
   const loadHistory = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from("workout_sessions")
-      .select("id, exercise_name, reps, correct_reps, warning_reps, error_reps, duration_seconds, created_at")
+      .select("id, exercise_name, reps, correct_reps, warning_reps, error_reps, duration_seconds, notes, created_at")
       .order("created_at", { ascending: false })
       .limit(5);
     setHistory(data ?? []);
@@ -137,6 +132,8 @@ const AnalysisPage = () => {
     }
 
     setReport(null);
+    setWorkoutReport(null);
+    if (completedSeriesRef.current.length === 0) workoutStartRef.current = Date.now();
     issuesRef.current = {};
     setRepCount(0);
     repCounterRef.current.reset(selectedExerciseRef.current.id);
@@ -152,6 +149,43 @@ const AnalysisPage = () => {
     seriesActiveRef.current = true;
   }, []);
 
+  const finishWorkout = useCallback(async (series: SeriesReport[]) => {
+    if (series.length === 0) return;
+    const exercise = selectedExerciseRef.current;
+    const exerciseName = exercise.id === 'squat' ? `${exercise.name} — ${SQUAT_VIEWS[squatViewRef.current].title}` : exercise.name;
+    const duration = workoutStartRef.current ? Math.round((Date.now()-workoutStartRef.current)/1000) : series.reduce((sum,item)=>sum+item.duration,0);
+    const finalReport = buildWorkoutReport(exerciseName, plannedSeries, series, duration);
+    setWorkoutReport(finalReport);
+    setCompletedSeries([]);
+    completedSeriesRef.current = [];
+    workoutStartRef.current = 0;
+
+    if (!user) {
+      toast.success(`Treino concluído: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'}`);
+      return;
+    }
+
+    setSavingSeries(true);
+    const { error } = await supabase.from('workout_sessions').insert({
+      user_id: user.id,
+      exercise_id: exercise.id,
+      exercise_name: exerciseName,
+      reps: finalReport.reps,
+      correct_reps: finalReport.correct,
+      warning_reps: finalReport.warning,
+      error_reps: finalReport.error,
+      duration_seconds: finalReport.duration,
+      notes: workoutNotes(finalReport),
+    });
+    setSavingSeries(false);
+    if (error) {
+      toast.error('O treino foi concluído, mas não foi possível salvá-lo no histórico.');
+      return;
+    }
+    toast.success(`Treino salvo: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'} e ${finalReport.reps} repetições`);
+    loadHistory();
+  }, [loadHistory, plannedSeries, user]);
+
   const stopSeries = useCallback(async () => {
     const stats = { ...statsRef.current };
     const wasActive = seriesActiveRef.current;
@@ -165,59 +199,16 @@ const AnalysisPage = () => {
 
     if (!wasActive) return;
 
-    const totalAttempts = stats.reps + stats.error;
-    const points = Object.entries(issues)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4)
-      .map(([message, count]) => ({ message, count }));
+    const seriesNumber = completedSeriesRef.current.length + 1;
+    const seriesReport = buildSeriesReport(exerciseName, seriesNumber, stats, duration, issues);
+    const updatedSeries = [...completedSeriesRef.current, seriesReport];
+    completedSeriesRef.current = updatedSeries;
+    setCompletedSeries(updatedSeries);
+    setReport(seriesReport);
 
-    const accuracy = totalAttempts > 0 ? Math.round((stats.correct / totalAttempts) * 100) : 0;
-    let summary: string;
-    if (totalAttempts === 0) {
-      summary = "Nenhum movimento completo foi detectado nesta série.";
-    } else if (points.length === 0) {
-      summary = "Execução consistente do início ao fim — mantenha esse padrão.";
-    } else if (accuracy >= 70) {
-      summary = "Boa série: a base está correta, ajuste os pontos abaixo para refinar a técnica.";
-    } else {
-      summary = "A técnica oscilou bastante. Reduza a carga e a velocidade para corrigir os pontos abaixo.";
-    }
-
-    setReport({
-      exerciseName,
-      reps: stats.reps,
-      correct: stats.correct,
-      warning: stats.warning,
-      error: stats.error,
-      duration,
-      accuracy,
-      summary,
-      points,
-    });
-
-    if (stats.reps === 0 || !user) return;
-
-    setSavingSeries(true);
-    const { error } = await supabase.from("workout_sessions").insert({
-      user_id: user.id,
-      exercise_id: exercise.id,
-      exercise_name: exerciseName,
-      reps: stats.reps,
-      correct_reps: stats.correct,
-      warning_reps: stats.warning,
-      error_reps: stats.error,
-      duration_seconds: duration,
-      notes: points.length ? points.map((p) => `${p.message} (${p.count}x)`).join(" | ") : null,
-    });
-    setSavingSeries(false);
-
-    if (error) {
-      toast.error("Não foi possível salvar a série.");
-      return;
-    }
-    toast.success(`Série salva: ${stats.reps} repetições`);
-    loadHistory();
-  }, [user, resetSeriesState, loadHistory]);
+    if (updatedSeries.length >= plannedSeries) await finishWorkout(updatedSeries);
+    else toast.success(`Série ${seriesNumber} de ${plannedSeries} concluída`);
+  }, [finishWorkout, plannedSeries, resetSeriesState]);
 
 
 
@@ -378,10 +369,14 @@ const AnalysisPage = () => {
 
               if (tracked?.rejected && seriesActiveRef.current) {
                 statsRef.current.error++;
+                statsRef.current.reps++;
+                setRepCount((count) => count + 1);
                 issuesRef.current[result.message] = (issuesRef.current[result.message] ?? 0) + 1;
               }
 
               if (rep.repCompleted && seriesActiveRef.current) {
+                statsRef.current.reps++;
+                setRepCount((count) => count + 1);
                 const feedbacks = repFeedbacksRef.current;
                 const errors = feedbacks.filter((f) => f.level === "error");
                 const warnings = feedbacks.filter((f) => f.level === "warning");
@@ -405,8 +400,6 @@ const AnalysisPage = () => {
                   } else {
                     statsRef.current.correct++;
                   }
-                  statsRef.current.reps++;
-                  setRepCount((c) => c + 1);
                 }
               }
 
@@ -544,21 +537,49 @@ const AnalysisPage = () => {
             {exercises.map((ex) => (
               <button
                 key={ex.id}
-                onClick={() => {
-                  setSelectedExercise(ex);
-                  stopSeries();
-                }}
+                disabled={workoutInProgress || savingSeries}
+                onClick={() => { setSelectedExercise(ex); setReport(null); setWorkoutReport(null); }}
                 className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                   selectedExercise.id === ex.id
                     ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
                     : "border border-border bg-card/80 text-secondary-foreground hover:bg-secondary"
-                }`}
+                } disabled:cursor-not-allowed disabled:opacity-50`}
               >
                 {ex.name}
               </button>
             ))}
           </div>
         </div>
+
+        <section className="surface mb-5 rounded-2xl p-4 md:p-5" aria-label="Configuração do treino">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Planejamento do treino</p>
+              <p className="mt-1 text-xs text-muted-foreground">Escolha quantas séries deseja realizar neste exercício.</p>
+            </div>
+            <label className="flex items-center gap-3 text-xs font-medium">
+              Quantidade de séries
+              <select
+                value={plannedSeries}
+                disabled={workoutInProgress || savingSeries}
+                onChange={(event) => setPlannedSeries(Number(event.target.value))}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary disabled:opacity-50"
+              >
+                {Array.from({ length: 8 }, (_, index) => index + 1).map(value => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex items-center gap-2" aria-label={`${completedSeries.length} de ${plannedSeries} séries concluídas`}>
+            {Array.from({ length: plannedSeries }, (_, index) => (
+              <span key={index} className={`h-2 flex-1 rounded-full ${index < completedSeries.length ? 'bg-primary' : index === completedSeries.length && seriesActive ? 'bg-primary/45' : 'bg-secondary'}`} />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {seriesActive ? `Série ${completedSeries.length + 1} de ${plannedSeries} em andamento` : completedSeries.length > 0 ? `${completedSeries.length} de ${plannedSeries} séries concluídas` : `Pronto para iniciar a série 1 de ${plannedSeries}`}
+          </p>
+        </section>
 
         {selectedExercise.id === 'squat' && (
           <section aria-label="Posição da câmera para o agachamento" className="mb-5 space-y-3">
@@ -640,7 +661,7 @@ const AnalysisPage = () => {
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
               <button
                 onClick={cameraActive ? stopCamera : startCamera}
-                disabled={modelLoading && !cameraActive}
+                disabled={(modelLoading && !cameraActive) || seriesActive}
                 className={`inline-flex items-center gap-2 rounded-full px-6 py-3 font-bold text-sm shadow-lg transition-all disabled:opacity-50 ${
                   cameraActive ? "bg-danger text-foreground" : "bg-primary text-primary-foreground"
                 }`}
@@ -735,9 +756,20 @@ const AnalysisPage = () => {
               ) : (
                 <>
                   <Play className="w-4 h-4" />
-                  Iniciar série
+                  {completedSeries.length > 0 ? `Iniciar próxima série (${completedSeries.length + 1}/${plannedSeries})` : `Iniciar série 1/${plannedSeries}`}
                 </>
               )}
+            </button>
+          )}
+
+          {cameraActive && !seriesActive && completedSeries.length > 0 && (
+            <button
+              type="button"
+              disabled={savingSeries}
+              onClick={() => finishWorkout(completedSeriesRef.current)}
+              className="w-full rounded-2xl border border-border py-3 text-sm font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
+            >
+              Encerrar treino com {completedSeries.length} {completedSeries.length === 1 ? 'série concluída' : 'séries concluídas'}
             </button>
           )}
 
@@ -750,7 +782,7 @@ const AnalysisPage = () => {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <ClipboardList className="w-4 h-4 text-primary" />
-                  <p className="text-sm font-semibold">Relatório da série — {report.exerciseName}</p>
+                  <p className="text-sm font-semibold">Feedback da série {report.seriesNumber} — {report.exerciseName}</p>
                 </div>
                 <button
                   onClick={() => setReport(null)}
@@ -764,15 +796,15 @@ const AnalysisPage = () => {
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold">{report.reps}</p>
-                  <p className="text-[10px] text-muted-foreground">Válidas</p>
+                  <p className="text-[10px] text-muted-foreground">Repetições</p>
                 </div>
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold text-success">{report.correct}</p>
-                  <p className="text-[10px] text-muted-foreground">Perfeitas</p>
+                  <p className="text-[10px] text-muted-foreground">Corretas</p>
                 </div>
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold text-warning">{report.warning}</p>
-                  <p className="text-[10px] text-muted-foreground">Com aviso</p>
+                  <p className="text-[10px] text-muted-foreground">Para melhorar</p>
                 </div>
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold text-danger">{report.error}</p>
@@ -807,15 +839,38 @@ const AnalysisPage = () => {
             </motion.div>
           )}
 
+          {workoutReport && (
+            <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-primary/30 bg-primary/[0.07] p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="font-semibold">Treino concluído — {workoutReport.exerciseName}</p>
+                  <p className="text-xs text-muted-foreground">{workoutReport.completedSeries} de {workoutReport.plannedSeries} séries realizadas</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
+                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold">{workoutReport.reps}</p><p className="text-[10px] text-muted-foreground">Repetições</p></div>
+                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-success">{workoutReport.correct}</p><p className="text-[10px] text-muted-foreground">Corretas</p></div>
+                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-warning">{workoutReport.warning}</p><p className="text-[10px] text-muted-foreground">Para melhorar</p></div>
+                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-danger">{workoutReport.error}</p><p className="text-[10px] text-muted-foreground">Incorretas</p></div>
+              </div>
+              <p className="text-sm">{workoutReport.summary}</p>
+              <p className="text-xs text-muted-foreground">Precisão técnica: {workoutReport.accuracy}% · Duração total: {workoutReport.duration}s</p>
+            </motion.section>
+          )}
+
 
           {history.length > 0 && (
             <div className="surface rounded-2xl px-5 py-4">
-              <p className="text-sm font-medium mb-2">Últimas séries</p>
+              <p className="text-sm font-medium mb-2">Últimos treinos registrados</p>
               <ul className="space-y-2">
                 {history.map((s) => (
-                  <li key={s.id} className="flex items-center justify-between text-xs">
-                    <span className="text-foreground">{s.exercise_name}</span>
-                    <span className="text-muted-foreground font-mono">
+                  <li key={s.id} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-foreground">
+                      {s.exercise_name}
+                      {s.notes?.match(/Séries: (\d+\/\d+)/)?.[1] && <span className="ml-2 text-muted-foreground">{s.notes.match(/Séries: (\d+\/\d+)/)?.[1]} séries</span>}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground font-mono">
                       {s.reps} reps · {s.correct_reps}✓ {s.warning_reps}! {s.error_reps}✕
                     </span>
                   </li>
