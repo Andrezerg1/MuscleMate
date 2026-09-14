@@ -135,11 +135,13 @@ export function checkBicepCurlPosition(keypoints: Keypoint[] | null): PositionCh
   const side = curlSide(keypoints);
   if (!side) return { ready: false, message: "Braço não visível — mostre ombro, cotovelo e punho" };
 
+  const orientationReliable = [ls, rs, lh, rh].every(point => (point.score ?? 0) > 0.3 && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (!orientationReliable) return { ready: true, message: "Braço visível — pode iniciar a série" };
   const shoulderSpan = Math.abs(ls.x - rs.x);
   const torso = Math.max(1, Math.abs((ls.y + rs.y) / 2 - (lh.y + rh.y) / 2));
   const ratio = shoulderSpan / torso;
 
-  if (ratio > 0.7) {
+  if (ratio > 0.9) {
     return { ready: false, message: "Vire-se de lado para a câmera (visão de perfil)" };
   }
   return { ready: true, message: "Perfil correto — pode iniciar a série" };

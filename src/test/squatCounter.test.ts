@@ -36,7 +36,7 @@ const cycle = () => angles.flatMap(a=>repeat(sidePose(a)));
 describe('lateral squat: standing → depth → standing', () => {
   it('counts exactly once, only after full return', () => {
     const result = run([...cycle(),...repeat(sidePose(175),8)]);
-    expect(result.flatMap((r,i)=>r.rep.repCompleted?[i]:[])).toEqual([26]);
+    expect(result.flatMap((r,i)=>r.rep.repCompleted?[i]:[])).toEqual([24]);
   });
   it('does not count when beginning already crouched', () => expect(run(cycle().slice(9)).some(r=>r.rep.repCompleted)).toBe(false));
   it('rejects a partial descent', () => expect(run([175,150,120,110,120,150,175].flatMap(a=>repeat(sidePose(a)))).filter(r=>r.rejected)).toHaveLength(1));
@@ -93,6 +93,11 @@ describe('lateral squat: standing → depth → standing', () => {
     expect(result.slice(26).every(r=>r.feedback.message==='Agachamento completo! ✓')).toBe(true);
     expect(result.every(r=>r.feedback.message.trim().length>0)).toBe(true);
   });
+  it('counts a fast lateral repetition without return delay', () => {
+    const frames = [175,175,140,105,90,120,158].map(a=>sidePose(a));
+    const result = run(frames,'side',60);
+    expect(result.at(-1)?.rep.repCompleted).toBe(true);
+  });
   it.each([0.6,1,1.7])('is independent of image scale %s and mirroring', scale => {
     for (const mirror of [1,-1]) {
       const p = cycle().map(frame=>frame.map(v=>({...v,x:100+v.x*scale*mirror,y:20+v.y*scale})));
@@ -133,6 +138,17 @@ describe('frontal squat: alignment, not sagittal depth', () => {
   it('detects inward collapse after mirroring and scaling', () => {
     const frames = drops.flatMap(d=>repeat(frontPose(d,d===120?40:0))).map(p=>p.map(v=>({...v,x:800-v.x*1.5,y:v.y*1.5})));
     expect(run(frames,'front').some(r=>r.rep.repCompleted)).toBe(false);
+  });
+  it('detects valgus during a fast frontal repetition', () => {
+    const frames = [0,0,55,115,55,0].map((drop,i)=>frontPose(drop,i===3?18:0));
+    const result = run(frames,'front',60);
+    expect(result.some(r=>r.rep.repCompleted)).toBe(false);
+    expect(result.at(-1)?.feedback.message).toContain('Joelho entrando');
+  });
+  it('counts a fast aligned frontal repetition', () => {
+    const frames = [0,0,55,115,55,0].map(drop=>frontPose(drop));
+    const result = run(frames,'front',60);
+    expect(result.at(-1)?.rep.repCompleted).toBe(true);
   });
 });
 describe('view and input validation', () => {

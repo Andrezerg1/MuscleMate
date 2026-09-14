@@ -21,10 +21,10 @@ export const SQUAT_VIEWS = {
 // Front-view projected knee angles are NOT sagittal flexion measurements.
 export const SQUAT_LIMITS = {
   extension: 155, departure: 145, depth: 105,
-  standingMs: 150, depthMs: 80, faultMs: 180,
-  minRepMs: 600, maxRepMs: 20000, maxGapMs: 350,
+  standingMs: 50, depthMs: 0, faultMs: 120,
+  minRepMs: 120, maxRepMs: 20000, maxGapMs: 400,
   frontalDeparture: 0.08, frontalDepth: 0.16, frontalReturn: 0.06,
-  valgusWarning: 0.045, valgusError: 0.08,
+  valgusWarning: 0.015, valgusError: 0.035,
   torsoWarning: 55, torsoError: 70, backwardError: 25,
 };
 const SIDES = [[6, 12, 14, 16], [5, 11, 13, 15]];
@@ -87,6 +87,7 @@ export class SquatCounter {
   private phase: RepPhase = 'top';
   private endMessage = '';
   private endLevel: FeedbackResult['level'] = 'correct';
+  private maxInward = 0;
   private holds = new Map<string, { since: number; frames: number }>();
 
   constructor(view: SquatView = 'side') { this.view = view; }
@@ -95,6 +96,7 @@ export class SquatCounter {
     this.reachedDepth = false; this.invalid = ''; this.warning = null;
     this.started = 0; this.lastFrame = null; this.progress = 0; this.phase = 'top'; this.holds.clear();
     this.endMessage = ''; this.endLevel = 'correct';
+    this.maxInward = 0;
   }
   private held(key: string, condition: boolean, now: number, duration: number) {
     if (!condition) { this.holds.delete(key); return false; }
@@ -143,7 +145,9 @@ export class SquatCounter {
       this.reset();
       return this.output(s, position, 'Movimento interrompido — volte à posição em pé', 'warning');
     }
-    const standingShape = s.knee >= SQUAT_LIMITS.extension && (this.view === 'front' || (s.hip >= 140 && Math.abs(s.lean) <= 35));
+    // Hip angle is highly unstable when the far hip is occluded; knee extension and
+    // controlled trunk position provide a faster, more reliable standing signal.
+    const standingShape = s.knee >= SQUAT_LIMITS.extension && (this.view === 'front' || Math.abs(s.lean) <= 40);
     if (!this.baseline) {
       if (this.held('start', standingShape, now, SQUAT_LIMITS.standingMs)) this.baseline = s;
       return this.output(s, position, this.baseline ? 'Posição inicial registrada — pode agachar' : 'Fique em pé por um instante para começar', this.baseline ? 'correct' : 'warning');
@@ -157,8 +161,10 @@ export class SquatCounter {
     if (!this.active && departed) {
       this.active = true; this.started = now; this.reachedDepth = false; this.invalid = ''; this.warning = null; this.holds.clear();
       this.endMessage = '';
+      this.maxInward = 0;
     }
     const inward = Math.max(0,...s.inward.map((v,i) => v-base.inward[i]));
+    if (this.active && this.view === 'front') this.maxInward = Math.max(this.maxInward, inward);
     const lean = Math.abs(s.lean);
     const backward = s.lean*s.facing < -SQUAT_LIMITS.backwardError;
     const fault = this.view === 'front'
@@ -169,14 +175,15 @@ export class SquatCounter {
       : s.kneeTravel/base.shin > 0.65 ? 'Joelho avançando bastante — observe o apoio dos pés e o controle'
         : lean > SQUAT_LIMITS.torsoWarning ? 'Observe a inclinação do tronco e mantenha o controle' : null;
     if (this.active) {
-      if (this.held('fault', !!fault, now, SQUAT_LIMITS.faultMs)) this.invalid ||= fault;
+      if (this.view === 'front' && this.maxInward > SQUAT_LIMITS.valgusError) this.invalid ||= 'Joelho entrando para dentro — mantenha o alinhamento dos joelhos';
+      else if (this.held('fault', !!fault, now, SQUAT_LIMITS.faultMs)) this.invalid ||= fault;
       if (this.held('advisory', !!advisory, now, SQUAT_LIMITS.faultMs)) this.warning ||= advisory;
       const deep = this.view === 'side' ? s.knee <= SQUAT_LIMITS.depth : drop >= SQUAT_LIMITS.frontalDepth;
-      if (this.held('depth', deep, now, SQUAT_LIMITS.depthMs)) this.reachedDepth = true;
+      if (this.view === 'front' ? deep : this.held('depth', deep, now, SQUAT_LIMITS.depthMs)) this.reachedDepth = true;
       this.phase = nextProgress < this.progress-0.015 ? 'ascending' : nextProgress > this.progress+0.015 ? 'descending' : this.phase;
       if (deep && this.phase !== 'ascending') this.phase = 'bottom';
       const returned = standingShape && (this.view === 'side' ? Math.abs(s.lean-base.lean) <= 30 : drop <= SQUAT_LIMITS.frontalReturn);
-      if (this.held('return', returned, now, SQUAT_LIMITS.standingMs)) {
+      if (returned) {
         const completed = this.reachedDepth && !this.invalid && now-this.started >= SQUAT_LIMITS.minRepMs;
         const reason = this.invalid || (this.reachedDepth ? 'Movimento rápido demais para validar' : 'Movimento incompleto — complete a descida antes de subir');
         this.active = false; this.phase = 'top'; this.progress = 0; this.reachedDepth = false; this.holds.clear();

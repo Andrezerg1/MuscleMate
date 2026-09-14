@@ -21,7 +21,7 @@ describe('complete curl cycles', () => {
     expect(result.flatMap((r,i)=>r.rep.repCompleted?[i]:[])).toEqual([10]);
   });
   it('requires an extended start', () => expect(run(cycle.slice(2)).some(r=>r.rep.repCompleted)).toBe(false));
-  it('rejects partial contraction', () => expect(run(cycle.map(a=>Math.max(a,70))).some(r=>r.rep.repCompleted)).toBe(false));
+  it('rejects partial contraction', () => expect(run(cycle.map(a=>Math.max(a,100))).some(r=>r.rep.repCompleted)).toBe(false));
   it('does not count before the return is complete', () => expect(run(cycle.slice(0,-2)).some(r=>r.rep.repCompleted)).toBe(false));
   it('allows deeper contraction without shoulder compensation', () => expect(run(cycle.map((a,i)=>i===5?15:a)).some(r=>r.rep.repCompleted)).toBe(true));
   it.each(['shoulder','elbow'])('tolerates a brief %s detection spike', kind => {
@@ -46,13 +46,13 @@ describe('complete curl cycles', () => {
     expect(result.slice(10).every(r=>r.feedback.message==='Repetição completa! ✓')).toBe(true);
   });
   it('allows a small peak tolerance', () => expect(run(cycle.map(a=>a===40?45:a)).filter(r=>r.rep.repCompleted)).toHaveLength(1));
-  it('requires a new full cycle after lost tracking', () => {
+  it('tolerates one lost tracking frame during a valid cycle', () => {
     const counter = new CurlCounter();
     const result = cycle.map((a,i)=>counter.update(i===5?null:pose(a),1000+i*100));
-    expect(result.some(r=>r.rep.repCompleted)).toBe(false);
+    expect(result.filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
   it('recovers after an invalid cycle', () => {
-    expect(run([...cycle.map(a=>Math.max(a,80)),...cycle]).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+    expect(run([...cycle.map(a=>Math.max(a,105)),...cycle]).filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
   it('does not count across a long tracking gap', () => {
     const counter = new CurlCounter();
@@ -60,5 +60,13 @@ describe('complete curl cycles', () => {
   });
   it('counts consecutive valid cycles once each', () => {
     expect(run([...cycle,...cycle,...cycle]).filter(r=>r.rep.repCompleted)).toHaveLength(3);
+  });
+  it('counts with a naturally bent resting arm and moderate contraction', () => {
+    expect(run([142,143,125,105,86,78,88,110,130,140,142]).filter(r=>r.rep.repCompleted)).toHaveLength(1);
+  });
+  it('counts a fast controlled repetition', () => {
+    const counter = new CurlCounter();
+    const result = [145,145,120,82,110,138,140].map((a,i)=>counter.update(pose(a),1000+i*60));
+    expect(result.filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
 });
