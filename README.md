@@ -70,3 +70,7 @@ não são transferidos automaticamente.
 - `src/lib/poseUtils.ts`: cálculo de ângulos, feedback e contador de repetições
 - `src/lib/exercises.ts`: catálogo e critérios dos exercícios
 - `src/integrations/supabase`: cliente e tipos do banco
+
+## Arquitetura
+
+As decisões arquitetônicas, tecnologias e justificativas do sistema estão documentadas no [ADR 0001 — Arquitetura geral do MuscleMate](docs/adr/0001-arquitetura-geral.md).
