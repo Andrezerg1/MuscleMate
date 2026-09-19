@@ -38,7 +38,7 @@ export interface TrainingWorkout {
 
 export const newId = () => crypto.randomUUID();
 export const newSet = (setNumber: number): TrainingSet => ({
-  id: newId(), setNumber, targetReps: 10, actualReps: null, loadKg: 0,
+  id: newId(), setNumber, targetReps: 0, actualReps: null, loadKg: 0,
   correctReps: 0, warningReps: 0, errorReps: 0, completed: false,
 });
 
