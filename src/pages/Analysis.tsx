@@ -18,6 +18,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { buildSeriesReport, buildWorkoutReport, workoutNotes, type SeriesReport, type WorkoutReport } from '@/lib/workoutSession';
+import { applyPostureResults, loadGuestWorkouts, saveGuestWorkouts } from '@/lib/trainingLog';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import type { PoseDetector, Keypoint } from "@tensorflow-models/pose-detection";
 import * as tf from "@tensorflow/tfjs-core";
@@ -37,6 +39,9 @@ interface WorkoutSession {
 }
 
 const AnalysisPage = () => {
+  const [searchParams] = useSearchParams();
+  const requestedExercise = searchParams.get('exercise');
+  const trainingExerciseId = searchParams.get('trainingExerciseId');
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -44,7 +49,7 @@ const AnalysisPage = () => {
   const [modelLoading, setModelLoading] = useState(false);
   const [modelReady, setModelReady] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [selectedExercise, setSelectedExercise] = useState(exercises[0]);
+  const [selectedExercise, setSelectedExercise] = useState(() => exercises.find(exercise=>exercise.id===requestedExercise) ?? exercises[0]);
   const [squatView, setSquatView] = useState<SquatView>('side');
   const squatViewRef = useRef<SquatView>('side');
   const squatCounterRef = useRef(new SquatCounter());
@@ -55,7 +60,7 @@ const AnalysisPage = () => {
   const [fps, setFps] = useState(0);
   const [report, setReport] = useState<SeriesReport | null>(null);
   const [workoutReport, setWorkoutReport] = useState<WorkoutReport | null>(null);
-  const [plannedSeries, setPlannedSeries] = useState(3);
+  const [plannedSeries, setPlannedSeries] = useState(() => Math.max(1,Math.min(8,Number(searchParams.get('series'))||3)));
   const [completedSeries, setCompletedSeries] = useState<SeriesReport[]>([]);
   const completedSeriesRef = useRef<SeriesReport[]>([]);
   const workoutStartRef = useRef(0);
@@ -160,6 +165,17 @@ const AnalysisPage = () => {
     completedSeriesRef.current = [];
     workoutStartRef.current = 0;
 
+    if (trainingExerciseId) {
+      if (user) {
+        const { data: linkedSets } = await supabase.from('training_sets').select('id').eq('workout_exercise_id',trainingExerciseId).order('set_number');
+        await Promise.all((linkedSets ?? []).map((set,index) => series[index] ? supabase.from('training_sets').update({
+          actual_reps:series[index].reps,correct_reps:series[index].correct,warning_reps:series[index].warning,error_reps:series[index].error,completed:true,completed_at:new Date().toISOString(),
+        }).eq('id',set.id) : Promise.resolve()));
+      } else {
+        saveGuestWorkouts(applyPostureResults(loadGuestWorkouts(),trainingExerciseId,series));
+      }
+    }
+
     if (!user) {
       toast.success(`Treino concluído: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'}`);
       return;
@@ -184,7 +200,7 @@ const AnalysisPage = () => {
     }
     toast.success(`Treino salvo: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'} e ${finalReport.reps} repetições`);
     loadHistory();
-  }, [loadHistory, plannedSeries, user]);
+  }, [loadHistory, plannedSeries, trainingExerciseId, user]);
 
   const stopSeries = useCallback(async () => {
     const stats = { ...statsRef.current };
@@ -856,6 +872,7 @@ const AnalysisPage = () => {
               </div>
               <p className="text-sm">{workoutReport.summary}</p>
               <p className="text-xs text-muted-foreground">Precisão técnica: {workoutReport.accuracy}% · Duração total: {workoutReport.duration}s</p>
+              {trainingExerciseId && <Link to="/treinos" className="inline-flex rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground">Voltar ao treino registrado</Link>}
             </motion.section>
           )}
 

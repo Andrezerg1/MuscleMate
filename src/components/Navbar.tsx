@@ -36,6 +36,7 @@ const Navbar = () => {
     { to: "/", label: "Início" },
     { to: "/exercicios", label: "Exercícios" },
     { to: "/analise", label: "Análise" },
+    { to: "/treinos", label: "Treinos" },
     { to: "/sobre", label: "Sobre" },
   ];
 

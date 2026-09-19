@@ -41,6 +41,24 @@ export type Database = {
         }
         Relationships: []
       }
+      training_workouts: {
+        Row: { id: string; user_id: string; name: string; status: string; started_at: string; completed_at: string | null; created_at: string }
+        Insert: { id?: string; user_id: string; name?: string; status?: string; started_at?: string; completed_at?: string | null; created_at?: string }
+        Update: { id?: string; user_id?: string; name?: string; status?: string; started_at?: string; completed_at?: string | null; created_at?: string }
+        Relationships: []
+      }
+      training_exercises: {
+        Row: { id: string; workout_id: string; exercise_id: string; exercise_name: string; position: number; posture_enabled: boolean; created_at: string }
+        Insert: { id?: string; workout_id: string; exercise_id: string; exercise_name: string; position?: number; posture_enabled?: boolean; created_at?: string }
+        Update: { id?: string; workout_id?: string; exercise_id?: string; exercise_name?: string; position?: number; posture_enabled?: boolean; created_at?: string }
+        Relationships: []
+      }
+      training_sets: {
+        Row: { id: string; workout_exercise_id: string; set_number: number; target_reps: number; actual_reps: number | null; load_kg: number; correct_reps: number; warning_reps: number; error_reps: number; completed: boolean; completed_at: string | null }
+        Insert: { id?: string; workout_exercise_id: string; set_number: number; target_reps?: number; actual_reps?: number | null; load_kg?: number; correct_reps?: number; warning_reps?: number; error_reps?: number; completed?: boolean; completed_at?: string | null }
+        Update: { id?: string; workout_exercise_id?: string; set_number?: number; target_reps?: number; actual_reps?: number | null; load_kg?: number; correct_reps?: number; warning_reps?: number; error_reps?: number; completed?: boolean; completed_at?: string | null }
+        Relationships: []
+      }
       workout_sessions: {
         Row: {
           correct_reps: number
