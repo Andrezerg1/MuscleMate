@@ -1,11 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-// Public browser configuration; Supabase RLS controls access to user data.
-// Pin the app to this project so stale environment variables cannot reconnect it.
-export const SUPABASE_PROJECT_ID = 'khjkayzjlizajambzgvy';
-export const SUPABASE_URL = 'https://khjkayzjlizajambzgvy.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_hpMkqPzVGrEOgM2d6sosNw_zvoX4sfy';
+const requiredPublicConfig = (name: string, value: string | undefined) => {
+  if (!value) throw new Error(`Configuração pública ausente: ${name}`);
+  return value;
+};
+
+// These values are public in the compiled browser app. RLS protects user data.
+// Private keys such as service_role must never be exposed through VITE_* variables.
+export const SUPABASE_PROJECT_ID = requiredPublicConfig('VITE_SUPABASE_PROJECT_ID', import.meta.env.VITE_SUPABASE_PROJECT_ID);
+export const SUPABASE_URL = requiredPublicConfig('VITE_SUPABASE_URL', import.meta.env.VITE_SUPABASE_URL);
+const SUPABASE_PUBLISHABLE_KEY = requiredPublicConfig('VITE_SUPABASE_PUBLISHABLE_KEY', import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
