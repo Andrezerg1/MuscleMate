@@ -257,31 +257,6 @@ export function analyzeDeadlift(keypoints: Keypoint[]): FeedbackResult | null {
   }
 }
 
-export function analyzeLunge(keypoints: Keypoint[]): FeedbackResult | null {
-  const { RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE } = KEYPOINTS;
-
-  let hip: number, knee: number, ankle: number;
-  if (isVisible(keypoints, RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE)) {
-    hip = RIGHT_HIP; knee = RIGHT_KNEE; ankle = RIGHT_ANKLE;
-  } else if (isVisible(keypoints, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE)) {
-    hip = LEFT_HIP; knee = LEFT_KNEE; ankle = LEFT_ANKLE;
-  } else {
-    return null;
-  }
-
-  const angle = calculateAngle(kp(keypoints, hip), kp(keypoints, knee), kp(keypoints, ankle));
-
-  if (angle > 160) {
-    return { level: "correct", angle, message: "Posição inicial — inicie o afundo", joint: "Joelho" };
-  } else if (angle >= 85 && angle <= 100) {
-    return { level: "correct", angle, message: "Ângulo perfeito! ✓", joint: "Joelho" };
-  } else if (angle > 100) {
-    return { level: "warning", angle, message: "Desça mais o quadril", joint: "Joelho" };
-  } else {
-    return { level: "error", angle, message: "Muito baixo — suba um pouco", joint: "Joelho" };
-  }
-}
-
 export type ExerciseAnalyzer = (keypoints: Keypoint[]) => FeedbackResult | null;
 
 export const exerciseAnalyzers: Record<string, ExerciseAnalyzer> = {
@@ -289,7 +264,6 @@ export const exerciseAnalyzers: Record<string, ExerciseAnalyzer> = {
   "bicep-curl": analyzeBicepCurl,
   "bench-press": analyzeBenchPress,
   deadlift: analyzeDeadlift,
-  lunge: analyzeLunge,
 };
 
 // ─── Rep counting state machine ──────────────────────────────────
@@ -314,7 +288,6 @@ export const repCounterConfigs: Record<string, RepCounterConfig> = {
   "bicep-curl": { topThreshold: 150, bottomThreshold: 90, stableFrames: 2, minRepMs: 500, maxRepMs: 12000, countAt: "bottom" },
   "bench-press": { topThreshold: 150, bottomThreshold: 100, stableFrames: 3, minRepMs: 600, maxRepMs: 15000 },
   deadlift: { topThreshold: 160, bottomThreshold: 125, stableFrames: 4, minRepMs: 900, maxRepMs: 20000 },
-  lunge: { topThreshold: 155, bottomThreshold: 110, stableFrames: 3, minRepMs: 800, maxRepMs: 15000 },
 };
 
 export const defaultRepConfig: RepCounterConfig = {

@@ -59,6 +59,12 @@ export type Database = {
         Update: { id?: string; workout_exercise_id?: string; set_number?: number; target_reps?: number; actual_reps?: number | null; load_kg?: number; correct_reps?: number; warning_reps?: number; error_reps?: number; completed?: boolean; completed_at?: string | null }
         Relationships: []
       }
+      exercise_videos: {
+        Row: { id: string; user_id: string; exercise_id: string; exercise_name: string; file_path: string; file_name: string; size_bytes: number; video_duration_seconds: number; analysis_duration_seconds: number; reps: number; correct_reps: number; warning_reps: number; error_reps: number; created_at: string }
+        Insert: { id?: string; user_id: string; exercise_id: string; exercise_name: string; file_path: string; file_name: string; size_bytes: number; video_duration_seconds?: number; analysis_duration_seconds?: number; reps?: number; correct_reps?: number; warning_reps?: number; error_reps?: number; created_at?: string }
+        Update: { id?: string; user_id?: string; exercise_id?: string; exercise_name?: string; file_path?: string; file_name?: string; size_bytes?: number; video_duration_seconds?: number; analysis_duration_seconds?: number; reps?: number; correct_reps?: number; warning_reps?: number; error_reps?: number; created_at?: string }
+        Relationships: []
+      }
       workout_sessions: {
         Row: {
           correct_reps: number

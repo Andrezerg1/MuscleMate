@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Camera, CameraOff, AlertTriangle, CheckCircle2, XCircle, Loader2, Play, Square, Eye, ClipboardList, X } from "lucide-react";
+import { Camera, CameraOff, AlertTriangle, CheckCircle2, XCircle, Loader2, Play, Square, Eye, ClipboardList, X, Upload, Film } from "lucide-react";
 import { exercises } from "@/lib/exercises";
 import { CurlCounter } from '@/lib/curlCounter';
 import { SquatCounter, SQUAT_VIEWS, checkSquatView, type SquatView } from '@/lib/squatCounter';
@@ -38,13 +38,34 @@ interface WorkoutSession {
   created_at: string;
 }
 
+interface ExerciseVideoHistory {
+  id: string;
+  file_name: string;
+  size_bytes: number;
+  video_duration_seconds: number;
+  reps: number;
+  correct_reps: number;
+  warning_reps: number;
+  error_reps: number;
+  created_at: string;
+  signedUrl: string;
+}
+
+type AnalysisSource = 'camera' | 'video' | null;
+
 const AnalysisPage = () => {
   const [searchParams] = useSearchParams();
   const requestedExercise = searchParams.get('exercise');
   const trainingExerciseId = searchParams.get('trainingExerciseId');
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [analysisSource, setAnalysisSource] = useState<AnalysisSource>(null);
+  const analysisSourceRef = useRef<AnalysisSource>(null);
+  const uploadedVideoRef = useRef<File | null>(null);
+  const uploadedVideoUrlRef = useRef<string | null>(null);
+  const [uploadedVideoName, setUploadedVideoName] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelReady, setModelReady] = useState(false);
@@ -83,6 +104,8 @@ const AnalysisPage = () => {
   const positionOkRef = useRef(true);
   const { user } = useAuth();
   const [history, setHistory] = useState<WorkoutSession[]>([]);
+  const [videoHistory, setVideoHistory] = useState<ExerciseVideoHistory[]>([]);
+  const [videoHistoryLoading, setVideoHistoryLoading] = useState(false);
   const [savingSeries, setSavingSeries] = useState(false);
   const workoutInProgress = seriesActive || completedSeries.length > 0;
 
@@ -96,9 +119,32 @@ const AnalysisPage = () => {
     setHistory(data ?? []);
   }, [user]);
 
+  const loadVideoHistory = useCallback(async () => {
+    if (!user) { setVideoHistory([]); return; }
+    setVideoHistoryLoading(true);
+    const { data, error } = await supabase
+      .from('exercise_videos')
+      .select('id,file_path,file_name,size_bytes,video_duration_seconds,reps,correct_reps,warning_reps,error_reps,created_at')
+      .eq('exercise_id', selectedExercise.id)
+      .order('created_at', { ascending: false })
+      .limit(12);
+    if (error || !data) {
+      setVideoHistory([]);
+      setVideoHistoryLoading(false);
+      return;
+    }
+    const { data: signed } = await supabase.storage.from('exercise-videos').createSignedUrls(data.map(item => item.file_path), 3600);
+    setVideoHistory(data.map((item, index) => ({ ...item, signedUrl: signed?.[index]?.signedUrl ?? '' })));
+    setVideoHistoryLoading(false);
+  }, [selectedExercise.id, user]);
+
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  useEffect(() => {
+    void loadVideoHistory();
+  }, [loadVideoHistory]);
 
   // Keep ref in sync
   useEffect(() => {
@@ -154,6 +200,45 @@ const AnalysisPage = () => {
     seriesActiveRef.current = true;
   }, []);
 
+  const saveAnalyzedVideo = useCallback(async (finalReport: WorkoutReport) => {
+    const file = uploadedVideoRef.current;
+    if (!user || analysisSourceRef.current !== 'video' || !file) return true;
+
+    const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
+    const filePath = `${user.id}/${selectedExerciseRef.current.id}/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage.from('exercise-videos').upload(filePath, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+    if (uploadError) {
+      toast.error('A análise foi concluída, mas o vídeo não pôde ser salvo. Verifique o formato ou o tamanho do arquivo.');
+      return false;
+    }
+
+    const videoDuration = Number.isFinite(videoRef.current?.duration) ? Math.round(videoRef.current?.duration ?? 0) : 0;
+    const { error: recordError } = await supabase.from('exercise_videos').insert({
+      user_id: user.id,
+      exercise_id: selectedExerciseRef.current.id,
+      exercise_name: finalReport.exerciseName,
+      file_path: filePath,
+      file_name: file.name,
+      size_bytes: file.size,
+      video_duration_seconds: videoDuration,
+      analysis_duration_seconds: finalReport.duration,
+      reps: finalReport.reps,
+      correct_reps: finalReport.correct,
+      warning_reps: finalReport.warning,
+      error_reps: finalReport.error,
+    });
+    if (recordError) {
+      await supabase.storage.from('exercise-videos').remove([filePath]);
+      toast.error('A análise foi concluída, mas não foi possível registrar o vídeo no histórico.');
+      return false;
+    }
+    await loadVideoHistory();
+    return true;
+  }, [loadVideoHistory, user]);
+
   const finishWorkout = useCallback(async (series: SeriesReport[]) => {
     if (series.length === 0) return;
     const exercise = selectedExerciseRef.current;
@@ -178,6 +263,7 @@ const AnalysisPage = () => {
 
     if (!user) {
       toast.success(`Treino concluído: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'}`);
+      if (analysisSourceRef.current === 'video') toast.info('Entre na sua conta para manter o vídeo no histórico.');
       return;
     }
 
@@ -198,9 +284,10 @@ const AnalysisPage = () => {
       toast.error('O treino foi concluído, mas não foi possível salvá-lo no histórico.');
       return;
     }
-    toast.success(`Treino salvo: ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'} e ${finalReport.reps} repetições`);
+    const videoSaved = await saveAnalyzedVideo(finalReport);
+    toast.success(`${analysisSourceRef.current === 'video' && videoSaved ? 'Vídeo e análise salvos' : 'Treino salvo'}: ${finalReport.reps} repetições`);
     loadHistory();
-  }, [loadHistory, plannedSeries, trainingExerciseId, user]);
+  }, [loadHistory, plannedSeries, saveAnalyzedVideo, trainingExerciseId, user]);
 
   const stopSeries = useCallback(async () => {
     const stats = { ...statsRef.current };
@@ -272,6 +359,12 @@ const AnalysisPage = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { ideal: "user" } },
       });
+      if (uploadedVideoUrlRef.current) URL.revokeObjectURL(uploadedVideoUrlRef.current);
+      uploadedVideoUrlRef.current = null;
+      uploadedVideoRef.current = null;
+      setUploadedVideoName(null);
+      analysisSourceRef.current = 'camera';
+      setAnalysisSource('camera');
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -299,9 +392,83 @@ const AnalysisPage = () => {
     squatEpochRef.current++;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      video.removeAttribute('src');
+      video.load();
+    }
+    if (uploadedVideoUrlRef.current) URL.revokeObjectURL(uploadedVideoUrlRef.current);
+    uploadedVideoUrlRef.current = null;
+    uploadedVideoRef.current = null;
+    setUploadedVideoName(null);
+    analysisSourceRef.current = null;
+    setAnalysisSource(null);
     setCameraActive(false);
     cancelAnimationFrame(animFrameRef.current);
   }, []);
+
+  const attachVideo = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(file.type)) {
+      toast.error('Formato não suportado. Anexe um vídeo MP4, WebM ou MOV.');
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      toast.error('O vídeo deve ter no máximo 200 MB.');
+      return;
+    }
+
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    cancelAnimationFrame(animFrameRef.current);
+    if (uploadedVideoUrlRef.current) URL.revokeObjectURL(uploadedVideoUrlRef.current);
+    const objectUrl = URL.createObjectURL(file);
+    uploadedVideoUrlRef.current = objectUrl;
+    uploadedVideoRef.current = file;
+    setUploadedVideoName(file.name);
+    setCameraError(null);
+    setReport(null);
+    setWorkoutReport(null);
+    setCompletedSeries([]);
+    completedSeriesRef.current = [];
+    setPlannedSeries(1);
+    resetSeriesState();
+    analysisSourceRef.current = 'video';
+    setAnalysisSource('video');
+
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = null;
+      video.src = objectUrl;
+      video.muted = true;
+      video.currentTime = 0;
+      video.load();
+    }
+    setCameraActive(true);
+    await loadModel();
+  }, [loadModel, resetSeriesState]);
+
+  const startVideoAnalysis = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || analysisSourceRef.current !== 'video') return;
+    video.currentTime = 0;
+    startSeries();
+    try {
+      await video.play();
+    } catch {
+      resetSeriesState();
+      toast.error('Não foi possível reproduzir o vídeo. Tente outro arquivo.');
+    }
+  }, [resetSeriesState, startSeries]);
+
+  const finishVideoAnalysis = useCallback(async () => {
+    videoRef.current?.pause();
+    await stopSeries();
+  }, [stopSeries]);
 
   // Main detection + draw loop
   useEffect(() => {
@@ -325,12 +492,16 @@ const AnalysisPage = () => {
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
 
-      // Mirror video
-      ctx.save();
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0);
-      ctx.restore();
+      const mirror = analysisSourceRef.current === 'camera';
+      if (mirror) {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0);
+      }
 
       try {
         const exerciseId = selectedExerciseRef.current.id;
@@ -343,7 +514,7 @@ const AnalysisPage = () => {
 
         if (poses.length > 0 && poses[0].keypoints) {
           const keypoints = poses[0].keypoints;
-          drawSkeleton(ctx, keypoints, canvas.width);
+          drawSkeleton(ctx, keypoints, canvas.width, mirror);
 
           const checker = exerciseId === 'squat'
             ? (points: Keypoint[] | null) => checkSquatView(points, squatViewRef.current)
@@ -462,7 +633,8 @@ const AnalysisPage = () => {
   }, [stopCamera]);
 
   // ─── Drawing helpers ──────────────────────────────────────
-  function drawSkeleton(ctx: CanvasRenderingContext2D, keypoints: Keypoint[], canvasWidth: number) {
+  function drawSkeleton(ctx: CanvasRenderingContext2D, keypoints: Keypoint[], canvasWidth: number, mirror: boolean) {
+    const drawX = (x: number) => mirror ? canvasWidth - x : x;
     // Draw connections
     ctx.lineWidth = 3;
     for (const [i, j] of SKELETON_CONNECTIONS) {
@@ -471,8 +643,8 @@ const AnalysisPage = () => {
       if ((kpA.score ?? 0) > 0.3 && (kpB.score ?? 0) > 0.3) {
         ctx.beginPath();
         ctx.strokeStyle = "hsl(142, 72%, 50%)";
-        ctx.moveTo(canvasWidth - kpA.x, kpA.y);
-        ctx.lineTo(canvasWidth - kpB.x, kpB.y);
+        ctx.moveTo(drawX(kpA.x), kpA.y);
+        ctx.lineTo(drawX(kpB.x), kpB.y);
         ctx.stroke();
       }
     }
@@ -481,7 +653,7 @@ const AnalysisPage = () => {
     for (const kp of keypoints) {
       if ((kp.score ?? 0) > 0.3) {
         ctx.beginPath();
-        ctx.arc(canvasWidth - kp.x, kp.y, 5, 0, 2 * Math.PI);
+        ctx.arc(drawX(kp.x), kp.y, 5, 0, 2 * Math.PI);
         ctx.fillStyle = "hsl(142, 72%, 60%)";
         ctx.fill();
         ctx.strokeStyle = "hsl(220, 20%, 6%)";
@@ -544,7 +716,8 @@ const AnalysisPage = () => {
       <div className="container mx-auto px-5 md:px-6 max-w-4xl">
         <div className="mb-6">
           <p className="eyebrow mb-2"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> Sessão de treino</p>
-          <h1 className="font-display text-3xl md:text-4xl font-bold">Análise em tempo real</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-bold">Análise de movimento</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Use a câmera ao vivo ou anexe um vídeo já gravado.</p>
         </div>
 
         {/* Exercise selector */}
@@ -553,7 +726,7 @@ const AnalysisPage = () => {
             {exercises.map((ex) => (
               <button
                 key={ex.id}
-                disabled={workoutInProgress || savingSeries}
+                disabled={workoutInProgress || savingSeries || cameraActive}
                 onClick={() => { setSelectedExercise(ex); setReport(null); setWorkoutReport(null); }}
                 className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                   selectedExercise.id === ex.id
@@ -577,7 +750,7 @@ const AnalysisPage = () => {
               Quantidade de séries
               <select
                 value={plannedSeries}
-                disabled={workoutInProgress || savingSeries}
+                disabled={workoutInProgress || savingSeries || analysisSource === 'video'}
                 onChange={(event) => setPlannedSeries(Number(event.target.value))}
                 className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary disabled:opacity-50"
               >
@@ -629,9 +802,10 @@ const AnalysisPage = () => {
           <div className="relative rounded-3xl border border-border bg-card overflow-hidden aspect-[3/4] sm:aspect-video shadow-2xl shadow-black/20">
             <video
               ref={videoRef}
-              className={`h-full w-full object-cover -scale-x-100 ${!cameraActive || modelReady ? "hidden" : ""}`}
+              className={`h-full w-full object-contain ${analysisSource === 'camera' ? '-scale-x-100' : ''} ${!cameraActive || modelReady ? "hidden" : ""}`}
               playsInline
               muted
+              onEnded={() => { if (analysisSourceRef.current === 'video' && seriesActiveRef.current) void finishVideoAnalysis(); }}
             />
             <canvas
               ref={canvasRef}
@@ -660,11 +834,12 @@ const AnalysisPage = () => {
                 ) : (
                   <>
                     <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/15">
-                      <Camera className="w-8 h-8 text-primary" />
+                      <Film className="w-8 h-8 text-primary" />
                     </div>
                     <p className="text-muted-foreground text-sm px-6 text-center">
                       {selectedExercise.id === 'squat' ? SQUAT_VIEWS[squatView].instruction : selectedExercise.cameraPosition}
                     </p>
+                    <p className="text-xs text-muted-foreground">Escolha a captura ao vivo ou um vídeo gravado.</p>
                     {cameraError && <p className="max-w-sm px-6 text-center text-xs text-danger">{cameraError}</p>}
                   </>
                 )}
@@ -674,30 +849,41 @@ const AnalysisPage = () => {
 
 
 
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-              <button
-                onClick={cameraActive ? stopCamera : startCamera}
-                disabled={(modelLoading && !cameraActive) || seriesActive}
-                className={`inline-flex items-center gap-2 rounded-full px-6 py-3 font-bold text-sm shadow-lg transition-all disabled:opacity-50 ${
-                  cameraActive ? "bg-danger text-foreground" : "bg-primary text-primary-foreground"
-                }`}
+            <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2">
+              {cameraActive ? <button
+                onClick={stopCamera}
+                disabled={seriesActive}
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-danger px-5 py-3 text-sm font-bold text-foreground shadow-lg transition-all disabled:opacity-50"
               >
-                {cameraActive ? (
-                  <>
-                    <CameraOff className="w-4 h-4" /> Parar
-                  </>
-                ) : modelLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
-                  </>
-                ) : (
-                  <>
-                    <Camera className="w-4 h-4" /> Ativar câmera
-                  </>
-                )}
-              </button>
+                <CameraOff className="w-4 h-4" /> {analysisSource === 'video' ? 'Remover vídeo' : 'Parar câmera'}
+              </button> : <>
+                <button
+                  onClick={startCamera}
+                  disabled={modelLoading}
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-lg disabled:opacity-50"
+                >
+                  {modelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Ativar câmera
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={modelLoading}
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-primary/35 bg-background/90 px-5 py-3 text-sm font-bold text-primary shadow-lg backdrop-blur-sm disabled:opacity-50"
+                >
+                  <Upload className="h-4 w-4" /> Anexar vídeo
+                </button>
+              </>}
+              <input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" className="hidden" onChange={event => void attachVideo(event)} />
             </div>
           </div>
+
+          {analysisSource === 'video' && uploadedVideoName && (
+            <div className="flex items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-4 py-3 text-xs">
+              <Film className="h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 truncate">{uploadedVideoName}</span>
+              <span className="shrink-0 text-muted-foreground">1 vídeo = 1 série</span>
+            </div>
+          )}
 
           {/* Essentials: feedback + reps */}
           <div className="grid grid-cols-3 gap-3 md:gap-4">
@@ -714,7 +900,7 @@ const AnalysisPage = () => {
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Ative a câmera para receber feedback.
+                  Ative a câmera ou anexe um vídeo para receber feedback.
                 </p>
               )}
             </div>
@@ -753,8 +939,8 @@ const AnalysisPage = () => {
 
           {cameraActive && (
             <button
-              onClick={seriesActive ? stopSeries : startSeries}
-              disabled={savingSeries}
+              onClick={seriesActive ? (analysisSource === 'video' ? finishVideoAnalysis : stopSeries) : (analysisSource === 'video' ? startVideoAnalysis : startSeries)}
+              disabled={savingSeries || modelLoading || !modelReady}
               className={`w-full inline-flex items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold transition-all disabled:opacity-50 ${
                 seriesActive
                   ? "bg-danger/15 text-danger"
@@ -772,7 +958,7 @@ const AnalysisPage = () => {
               ) : (
                 <>
                   <Play className="w-4 h-4" />
-                  {completedSeries.length > 0 ? `Iniciar próxima série (${completedSeries.length + 1}/${plannedSeries})` : `Iniciar série 1/${plannedSeries}`}
+                  {analysisSource === 'video' ? 'Analisar vídeo' : completedSeries.length > 0 ? `Iniciar próxima série (${completedSeries.length + 1}/${plannedSeries})` : `Iniciar série 1/${plannedSeries}`}
                 </>
               )}
             </button>
@@ -875,6 +1061,63 @@ const AnalysisPage = () => {
               {trainingExerciseId && <Link to="/treinos" className="inline-flex rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground">Voltar ao treino registrado</Link>}
             </motion.section>
           )}
+
+
+          <section className="surface rounded-2xl px-5 py-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Film className="h-4 w-4 text-primary" />
+                  <h2 className="text-sm font-semibold">Vídeos de {selectedExercise.name}</h2>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Seus vídeos analisados ficam organizados separadamente em cada exercício.</p>
+              </div>
+              {user && videoHistory.length > 0 && (
+                <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
+                  {videoHistory.length} {videoHistory.length === 1 ? 'VÍDEO' : 'VÍDEOS'}
+                </span>
+              )}
+            </div>
+
+            {!user ? (
+              <p className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">
+                Você pode analisar um vídeo como visitante. Entre na sua conta para mantê-lo salvo no histórico.
+              </p>
+            ) : videoHistoryLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Carregando vídeos...
+              </div>
+            ) : videoHistory.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">Nenhum vídeo analisado neste exercício ainda.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {videoHistory.map((item) => (
+                  <article key={item.id} className="overflow-hidden rounded-2xl border border-border bg-background/45">
+                    {item.signedUrl ? (
+                      <video src={item.signedUrl} controls preload="metadata" className="aspect-video w-full bg-black object-contain" />
+                    ) : (
+                      <div className="flex aspect-video items-center justify-center bg-muted/50 text-xs text-muted-foreground">Vídeo temporariamente indisponível</div>
+                    )}
+                    <div className="space-y-3 p-4">
+                      <div>
+                        <p className="truncate text-xs font-semibold" title={item.file_name}>{item.file_name}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          {new Date(item.created_at).toLocaleString('pt-BR')} · {(item.size_bytes / 1024 / 1024).toFixed(1)} MB
+                          {item.video_duration_seconds > 0 ? ` · ${item.video_duration_seconds}s` : ''}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5 text-center">
+                        <div className="rounded-lg bg-muted/60 py-2"><p className="text-sm font-bold">{item.reps}</p><p className="text-[9px] text-muted-foreground">Reps</p></div>
+                        <div className="rounded-lg bg-success/10 py-2"><p className="text-sm font-bold text-success">{item.correct_reps}</p><p className="text-[9px] text-muted-foreground">Corretas</p></div>
+                        <div className="rounded-lg bg-warning/10 py-2"><p className="text-sm font-bold text-warning">{item.warning_reps}</p><p className="text-[9px] text-muted-foreground">Melhorar</p></div>
+                        <div className="rounded-lg bg-danger/10 py-2"><p className="text-sm font-bold text-danger">{item.error_reps}</p><p className="text-[9px] text-muted-foreground">Inválidas</p></div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
 
           {history.length > 0 && (

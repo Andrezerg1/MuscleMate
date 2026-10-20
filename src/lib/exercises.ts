@@ -67,18 +67,4 @@ export const exercises: Exercise[] = [
     angleRange: { min: 160, max: 180, joint: "Coluna" },
     cameraPosition: "Posicione-se de perfil para a câmera, corpo inteiro visível",
   },
-  {
-    id: "lunge",
-    name: "Afundo",
-    nameEn: "Lunge",
-    description: "Exercício unilateral para quadríceps, glúteos e estabilidade do core.",
-    landmarks: ["Quadril", "Joelho anterior", "Tornozelo"],
-    correctCriteria: "Joelho da frente a 90°; joelho não ultrapassa o pé; tronco ereto",
-    commonErrors: [
-      { error: "Joelho ultrapassa o pé", feedback: "Recue mais o passo" },
-      { error: "Tronco inclinado", feedback: "Mantenha o tronco ereto" },
-    ],
-    angleRange: { min: 85, max: 95, joint: "Joelho" },
-    cameraPosition: "Posicione-se de perfil para a câmera, pernas visíveis",
-  },
 ];

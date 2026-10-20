@@ -2,7 +2,6 @@ export const TRAINING_EXERCISES = [
   { id: 'squat', name: 'Agachamento', analysisId: 'squat' },
   { id: 'bicep-curl', name: 'Rosca Direta', analysisId: 'bicep-curl' },
   { id: 'bench-press', name: 'Supino', analysisId: 'bench-press' },
-  { id: 'lunge', name: 'Afundo', analysisId: 'lunge' },
   { id: 'row', name: 'Remada', analysisId: null },
 ] as const;
 
