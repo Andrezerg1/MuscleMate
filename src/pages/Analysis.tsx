@@ -66,6 +66,7 @@ const AnalysisPage = () => {
   const uploadedVideoRef = useRef<File | null>(null);
   const uploadedVideoUrlRef = useRef<string | null>(null);
   const [uploadedVideoName, setUploadedVideoName] = useState<string | null>(null);
+  const [videoAwaitingNext, setVideoAwaitingNext] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [modelReady, setModelReady] = useState(false);
@@ -200,7 +201,7 @@ const AnalysisPage = () => {
     seriesActiveRef.current = true;
   }, []);
 
-  const saveAnalyzedVideo = useCallback(async (finalReport: WorkoutReport) => {
+  const saveAnalyzedVideo = useCallback(async (seriesReport: SeriesReport) => {
     const file = uploadedVideoRef.current;
     if (!user || analysisSourceRef.current !== 'video' || !file) return true;
 
@@ -219,16 +220,16 @@ const AnalysisPage = () => {
     const { error: recordError } = await supabase.from('exercise_videos').insert({
       user_id: user.id,
       exercise_id: selectedExerciseRef.current.id,
-      exercise_name: finalReport.exerciseName,
+      exercise_name: seriesReport.exerciseName,
       file_path: filePath,
       file_name: file.name,
       size_bytes: file.size,
       video_duration_seconds: videoDuration,
-      analysis_duration_seconds: finalReport.duration,
-      reps: finalReport.reps,
-      correct_reps: finalReport.correct,
-      warning_reps: finalReport.warning,
-      error_reps: finalReport.error,
+      analysis_duration_seconds: seriesReport.duration,
+      reps: seriesReport.reps,
+      correct_reps: seriesReport.correct,
+      warning_reps: seriesReport.warning,
+      error_reps: seriesReport.error,
     });
     if (recordError) {
       await supabase.storage.from('exercise-videos').remove([filePath]);
@@ -284,10 +285,9 @@ const AnalysisPage = () => {
       toast.error('O treino foi concluído, mas não foi possível salvá-lo no histórico.');
       return;
     }
-    const videoSaved = await saveAnalyzedVideo(finalReport);
-    toast.success(`${analysisSourceRef.current === 'video' && videoSaved ? 'Vídeo e análise salvos' : 'Treino salvo'}: ${finalReport.reps} repetições`);
+    toast.success(`Treino salvo: ${finalReport.reps} repetições em ${finalReport.completedSeries} ${finalReport.completedSeries === 1 ? 'série' : 'séries'}`);
     loadHistory();
-  }, [loadHistory, plannedSeries, saveAnalyzedVideo, trainingExerciseId, user]);
+  }, [loadHistory, plannedSeries, trainingExerciseId, user]);
 
   const stopSeries = useCallback(async () => {
     const stats = { ...statsRef.current };
@@ -309,9 +309,19 @@ const AnalysisPage = () => {
     setCompletedSeries(updatedSeries);
     setReport(seriesReport);
 
+    if (analysisSourceRef.current === 'video') {
+      setSavingSeries(true);
+      const videoSaved = await saveAnalyzedVideo(seriesReport);
+      setSavingSeries(false);
+      if (videoSaved && user) toast.success(`Vídeo da série ${seriesNumber} salvo no histórico`);
+    }
+
     if (updatedSeries.length >= plannedSeries) await finishWorkout(updatedSeries);
-    else toast.success(`Série ${seriesNumber} de ${plannedSeries} concluída`);
-  }, [finishWorkout, plannedSeries, resetSeriesState]);
+    else {
+      if (analysisSourceRef.current === 'video') setVideoAwaitingNext(true);
+      toast.success(`Série ${seriesNumber} de ${plannedSeries} concluída`);
+    }
+  }, [finishWorkout, plannedSeries, resetSeriesState, saveAnalyzedVideo, user]);
 
 
 
@@ -403,6 +413,7 @@ const AnalysisPage = () => {
     uploadedVideoUrlRef.current = null;
     uploadedVideoRef.current = null;
     setUploadedVideoName(null);
+    setVideoAwaitingNext(false);
     analysisSourceRef.current = null;
     setAnalysisSource(null);
     setCameraActive(false);
@@ -431,14 +442,17 @@ const AnalysisPage = () => {
     uploadedVideoRef.current = file;
     setUploadedVideoName(file.name);
     setCameraError(null);
+    const continuingVideoWorkout = completedSeriesRef.current.length > 0;
     setReport(null);
-    setWorkoutReport(null);
-    setCompletedSeries([]);
-    completedSeriesRef.current = [];
-    setPlannedSeries(1);
+    if (!continuingVideoWorkout) {
+      setWorkoutReport(null);
+      setCompletedSeries([]);
+      completedSeriesRef.current = [];
+    }
     resetSeriesState();
     analysisSourceRef.current = 'video';
     setAnalysisSource('video');
+    setVideoAwaitingNext(false);
 
     const video = videoRef.current;
     if (video) {
@@ -850,13 +864,25 @@ const AnalysisPage = () => {
 
 
             <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2">
-              {cameraActive ? <button
-                onClick={stopCamera}
-                disabled={seriesActive}
-                className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-danger px-5 py-3 text-sm font-bold text-foreground shadow-lg transition-all disabled:opacity-50"
-              >
-                <CameraOff className="w-4 h-4" /> {analysisSource === 'video' ? 'Remover vídeo' : 'Parar câmera'}
-              </button> : <>
+              {cameraActive ? <>
+                {analysisSource === 'video' && videoAwaitingNext && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={savingSeries}
+                    className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-primary px-5 py-3 text-sm font-bold text-primary-foreground shadow-lg disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" /> Anexar vídeo da série {completedSeries.length + 1}
+                  </button>
+                )}
+                <button
+                  onClick={stopCamera}
+                  disabled={seriesActive || savingSeries}
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-danger px-5 py-3 text-sm font-bold text-foreground shadow-lg transition-all disabled:opacity-50"
+                >
+                  <CameraOff className="w-4 h-4" /> {analysisSource === 'video' ? 'Remover vídeo' : 'Parar câmera'}
+                </button>
+              </> : <>
                 <button
                   onClick={startCamera}
                   disabled={modelLoading}
@@ -881,7 +907,9 @@ const AnalysisPage = () => {
             <div className="flex items-center gap-2 rounded-2xl border border-primary/25 bg-primary/[0.06] px-4 py-3 text-xs">
               <Film className="h-4 w-4 shrink-0 text-primary" />
               <span className="min-w-0 flex-1 truncate">{uploadedVideoName}</span>
-              <span className="shrink-0 text-muted-foreground">1 vídeo = 1 série</span>
+              <span className="shrink-0 text-muted-foreground">
+                {videoAwaitingNext ? `Série ${completedSeries.length} concluída · anexe o próximo vídeo` : `Vídeo da série ${completedSeries.length + 1} de ${plannedSeries}`}
+              </span>
             </div>
           )}
 
@@ -937,7 +965,7 @@ const AnalysisPage = () => {
             </div>
           )}
 
-          {cameraActive && (
+          {cameraActive && !videoAwaitingNext && (
             <button
               onClick={seriesActive ? (analysisSource === 'video' ? finishVideoAnalysis : stopSeries) : (analysisSource === 'video' ? startVideoAnalysis : startSeries)}
               disabled={savingSeries || modelLoading || !modelReady}
