@@ -22,6 +22,13 @@ export interface FeedbackResult {
   joint: string;
 }
 
+export const DEADLIFT_POSTURE_LIMITS = {
+  /** Faixa compatível com a dobradiça normal do quadril durante o levantamento. */
+  controlled: 115,
+  /** Abaixo deste ponto, a inclinação é acentuada o bastante para exigir correção. */
+  excessive: 100,
+} as const;
+
 // MoveNet keypoint indices
 export const KEYPOINTS = {
   NOSE: 0,
@@ -246,14 +253,16 @@ export function analyzeDeadlift(keypoints: Keypoint[]): FeedbackResult | null {
     return null;
   }
 
-  const angle = calculateAngle(kp(keypoints, shoulder), kp(keypoints, hip), kp(keypoints, knee));
+  const angle = Math.round(calculateAngle(kp(keypoints, shoulder), kp(keypoints, hip), kp(keypoints, knee)) * 10) / 10;
 
-  if (angle >= 160) {
-    return { level: "correct", angle, message: "Coluna alinhada! ✓", joint: "Coluna" };
-  } else if (angle >= 140) {
-    return { level: "warning", angle, message: "Mantenha as costas mais retas", joint: "Coluna" };
+  // Este ângulo representa a dobradiça ombro–quadril–joelho, não uma medição
+  // clínica da curvatura lombar. A faixa inferior faz parte da descida normal.
+  if (angle >= DEADLIFT_POSTURE_LIMITS.controlled) {
+    return { level: "correct", angle, message: "Tronco firme e movimento controlado ✓", joint: "Quadril e tronco" };
+  } else if (angle >= DEADLIFT_POSTURE_LIMITS.excessive) {
+    return { level: "warning", angle, message: "Inclinação acentuada — mantenha o tronco firme", joint: "Quadril e tronco" };
   } else {
-    return { level: "error", angle, message: "Costas curvadas! Corrija a postura", joint: "Coluna" };
+    return { level: "error", angle, message: "Inclinação excessiva — reduza a amplitude e estabilize o tronco", joint: "Quadril e tronco" };
   }
 }
 

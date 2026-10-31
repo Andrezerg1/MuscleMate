@@ -59,12 +59,12 @@ export const exercises: Exercise[] = [
     nameEn: "Deadlift",
     description: "Exercício composto que trabalha toda a cadeia posterior — lombar, glúteos e isquiotibiais.",
     landmarks: ["Quadril", "Joelho", "Coluna (ombro-quadril)"],
-    correctCriteria: "Coluna neutra; quadril como dobradiça",
+    correctCriteria: "Tronco firme; quadril em movimento de dobradiça e amplitude controlada",
     commonErrors: [
-      { error: "Curvatura da lombar", feedback: "Mantenha as costas retas" },
+      { error: "Inclinação excessiva do tronco", feedback: "Reduza a amplitude e estabilize o tronco" },
       { error: "Joelho ultrapassando o pé", feedback: "Empurre o quadril para trás" },
     ],
-    angleRange: { min: 160, max: 180, joint: "Coluna" },
+    angleRange: { min: 115, max: 180, joint: "Quadril e tronco" },
     cameraPosition: "Posicione-se de perfil para a câmera, corpo inteiro visível",
   },
 ];
