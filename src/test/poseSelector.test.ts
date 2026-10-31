@@ -34,4 +34,10 @@ describe('selectPrimaryPose', () => {
     incomplete.keypoints.forEach((point, index) => { if (index > 3) point.score = 0.1; });
     expect(selectPrimaryPose([incomplete], 640, 480)).toBeNull();
   });
+
+  it('aceita uma pose mobile com cinco pontos confiáveis', () => {
+    const mobilePose = person(4, 320, 240, 260);
+    mobilePose.keypoints.forEach((point, index) => { point.score = index < 5 ? 0.8 : 0.2; });
+    expect(selectPrimaryPose([mobilePose], 640, 480)?.pose.id).toBe(4);
+  });
 });

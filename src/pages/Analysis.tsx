@@ -100,6 +100,7 @@ const AnalysisPage = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const detectorRef = useRef<PoseDetector | null>(null);
+  const multiPoseEnabledRef = useRef(false);
   const primaryPoseRef = useRef<TrackedPoseIdentity | null>(null);
   const missingPoseFramesRef = useRef(0);
   const lastUiUpdateRef = useRef(0);
@@ -349,15 +350,20 @@ const AnalysisPage = () => {
       const detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
-          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+          modelType: isMobile
+            ? poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            : poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
           enableSmoothing: true,
-          minPoseScore: 0.3,
-          multiPoseMaxDimension: isMobile ? 192 : 320,
-          enableTracking: true,
+          minPoseScore: isMobile ? 0.2 : 0.3,
+          ...(!isMobile && {
+            multiPoseMaxDimension: 320,
+            enableTracking: true,
+          }),
         }
       );
 
       detectorRef.current = detector;
+      multiPoseEnabledRef.current = !isMobile;
       setModelReady(true);
     } catch (err) {
       console.error("Erro ao carregar modelo:", err);
@@ -538,7 +544,9 @@ const AnalysisPage = () => {
         const exerciseId = selectedExerciseRef.current.id;
         const squatEpoch = squatEpochRef.current;
         const inferenceStartedAt = performance.now();
-        const poses = await detector.estimatePoses(video, { maxPoses: 6 });
+        const poses = await detector.estimatePoses(video, {
+          maxPoses: multiPoseEnabledRef.current ? 6 : 1,
+        });
         const latency = performance.now() - inferenceStartedAt;
         latencyAverage = latencyAverage * 0.8 + latency * 0.2;
         // Mantém entre 8 e 15 análises/s no mobile, conforme a capacidade real.

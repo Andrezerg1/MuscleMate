@@ -12,8 +12,8 @@ export interface PrimaryPoseSelection {
 }
 
 function visibleBounds(keypoints: Keypoint[]) {
-  const visible = keypoints.filter(point => (point.score ?? 0) >= 0.3);
-  if (visible.length < 6) return null;
+  const visible = keypoints.filter(point => (point.score ?? 0) >= 0.25);
+  if (visible.length < 5) return null;
   const xs = visible.map(point => point.x);
   const ys = visible.map(point => point.y);
   const left = Math.min(...xs);
