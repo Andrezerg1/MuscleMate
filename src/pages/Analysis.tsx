@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { buildSeriesReport, buildWorkoutReport, workoutNotes, type SeriesReport, type WorkoutReport } from '@/lib/workoutSession';
 import { applyPostureResults, loadGuestWorkouts, saveGuestWorkouts } from '@/lib/trainingLog';
 import { Link, useSearchParams } from 'react-router-dom';
+import { selectPrimaryPose, type TrackedPoseIdentity } from '@/lib/poseSelector';
 
 import type { PoseDetector, Keypoint } from "@tensorflow-models/pose-detection";
 import * as tf from "@tensorflow/tfjs-core";
@@ -95,6 +96,7 @@ const AnalysisPage = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const detectorRef = useRef<PoseDetector | null>(null);
+  const primaryPoseRef = useRef<TrackedPoseIdentity | null>(null);
   const selectedExerciseRef = useRef(selectedExercise);
   const issuesRef = useRef<Record<string, number>>({});
 
@@ -335,17 +337,17 @@ const AnalysisPage = () => {
       await tf.setBackend("webgl");
       await tf.ready();
 
-      // Thunder is more accurate but heavier — use Lightning on mobile devices
+      // MultiPose keeps the athlete stable even when other people cross the frame.
       const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
       const detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
-          modelType: isMobile
-            ? poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
-            : poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
+          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
           enableSmoothing: true,
           minPoseScore: 0.3,
+          multiPoseMaxDimension: isMobile ? 256 : 384,
+          enableTracking: true,
         }
       );
 
@@ -373,6 +375,7 @@ const AnalysisPage = () => {
       uploadedVideoUrlRef.current = null;
       uploadedVideoRef.current = null;
       setUploadedVideoName(null);
+      primaryPoseRef.current = null;
       analysisSourceRef.current = 'camera';
       setAnalysisSource('camera');
       streamRef.current = stream;
@@ -414,6 +417,7 @@ const AnalysisPage = () => {
     uploadedVideoRef.current = null;
     setUploadedVideoName(null);
     setVideoAwaitingNext(false);
+    primaryPoseRef.current = null;
     analysisSourceRef.current = null;
     setAnalysisSource(null);
     setCameraActive(false);
@@ -453,6 +457,7 @@ const AnalysisPage = () => {
     analysisSourceRef.current = 'video';
     setAnalysisSource('video');
     setVideoAwaitingNext(false);
+    primaryPoseRef.current = null;
 
     const video = videoRef.current;
     if (video) {
@@ -520,14 +525,16 @@ const AnalysisPage = () => {
       try {
         const exerciseId = selectedExerciseRef.current.id;
         const squatEpoch = squatEpochRef.current;
-        const poses = await detector.estimatePoses(video);
+        const poses = await detector.estimatePoses(video, { maxPoses: 6 });
         if (exerciseId !== selectedExerciseRef.current.id || squatEpoch !== squatEpochRef.current) {
           animFrameRef.current = requestAnimationFrame(detect);
           return;
         }
 
-        if (poses.length > 0 && poses[0].keypoints) {
-          const keypoints = poses[0].keypoints;
+        const selection = selectPrimaryPose(poses, canvas.width, canvas.height, primaryPoseRef.current);
+        if (selection?.pose.keypoints) {
+          primaryPoseRef.current = selection.identity;
+          const keypoints = selection.pose.keypoints;
           drawSkeleton(ctx, keypoints, canvas.width, mirror);
 
           const checker = exerciseId === 'squat'
@@ -581,19 +588,22 @@ const AnalysisPage = () => {
                 const feedbacks = repFeedbacksRef.current;
                 const errors = feedbacks.filter((f) => f.level === "error");
                 const warnings = feedbacks.filter((f) => f.level === "warning");
+                const isDeadlift = exerciseId === 'deadlift';
+                const errorLimit = isDeadlift ? Math.max(3, Math.ceil(feedbacks.length * 0.2)) : 2;
+                const warningLimit = isDeadlift ? Math.max(5, Math.ceil(feedbacks.length * 0.35)) : 3;
 
                 if (!positionOkRef.current) {
                   // Movimento fora da posição exigida — não valida a repetição
                   issuesRef.current["Posicionamento incorreto em relação à câmera"] =
                     (issuesRef.current["Posicionamento incorreto em relação à câmera"] ?? 0) + 1;
                   statsRef.current.error++;
-                } else if (errors.length > 2) {
+                } else if (errors.length > errorLimit) {
                   // Execução incorreta — não conta como repetição válida
                   issuesRef.current[errors[0].message] =
                     (issuesRef.current[errors[0].message] ?? 0) + 1;
                   statsRef.current.error++;
                 } else {
-                  if (squat?.warning || warnings.length > 3) {
+                  if (squat?.warning || warnings.length > warningLimit) {
                     const warningMessage = squat?.warning || warnings[0].message;
                     issuesRef.current[warningMessage] =
                       (issuesRef.current[warningMessage] ?? 0) + 1;

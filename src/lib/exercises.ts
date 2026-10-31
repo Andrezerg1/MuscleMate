@@ -64,7 +64,7 @@ export const exercises: Exercise[] = [
       { error: "Inclinação excessiva do tronco", feedback: "Reduza a amplitude e estabilize o tronco" },
       { error: "Joelho ultrapassando o pé", feedback: "Empurre o quadril para trás" },
     ],
-    angleRange: { min: 115, max: 180, joint: "Quadril e tronco" },
+    angleRange: { min: 65, max: 180, joint: "Quadril e tronco" },
     cameraPosition: "Posicione-se de perfil para a câmera, corpo inteiro visível",
   },
 ];

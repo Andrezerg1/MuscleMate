@@ -24,9 +24,9 @@ export interface FeedbackResult {
 
 export const DEADLIFT_POSTURE_LIMITS = {
   /** Faixa compatível com a dobradiça normal do quadril durante o levantamento. */
-  controlled: 115,
+  controlled: 65,
   /** Abaixo deste ponto, a inclinação é acentuada o bastante para exigir correção. */
-  excessive: 100,
+  excessive: 52,
 } as const;
 
 // MoveNet keypoint indices

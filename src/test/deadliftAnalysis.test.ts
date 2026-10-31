@@ -16,16 +16,16 @@ function poseWithHipAngle(angle: number): Keypoint[] {
 }
 
 describe('analyzeDeadlift', () => {
-  it.each([180, 160, 140, 125, DEADLIFT_POSTURE_LIMITS.controlled])(
+  it.each([180, 160, 140, 125, 67, DEADLIFT_POSTURE_LIMITS.controlled])(
     'aceita %s° como parte da amplitude normal',
     (angle) => expect(analyzeDeadlift(poseWithHipAngle(angle))?.level).toBe('correct'),
   );
 
   it('gera aviso apenas abaixo da faixa controlada', () => {
-    expect(analyzeDeadlift(poseWithHipAngle(110))?.level).toBe('warning');
+    expect(analyzeDeadlift(poseWithHipAngle(60))?.level).toBe('warning');
   });
 
   it('reserva erro para inclinação realmente excessiva', () => {
-    expect(analyzeDeadlift(poseWithHipAngle(90))?.level).toBe('error');
+    expect(analyzeDeadlift(poseWithHipAngle(45))?.level).toBe('error');
   });
 });
