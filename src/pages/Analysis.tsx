@@ -54,6 +54,10 @@ interface ExerciseVideoHistory {
 
 type AnalysisSource = 'camera' | 'video' | null;
 
+const isMobileDevice = () =>
+  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 const AnalysisPage = () => {
   const [searchParams] = useSearchParams();
   const requestedExercise = searchParams.get('exercise');
@@ -97,6 +101,8 @@ const AnalysisPage = () => {
   const animFrameRef = useRef<number>(0);
   const detectorRef = useRef<PoseDetector | null>(null);
   const primaryPoseRef = useRef<TrackedPoseIdentity | null>(null);
+  const missingPoseFramesRef = useRef(0);
+  const lastUiUpdateRef = useRef(0);
   const selectedExerciseRef = useRef(selectedExercise);
   const issuesRef = useRef<Record<string, number>>({});
 
@@ -338,7 +344,7 @@ const AnalysisPage = () => {
       await tf.ready();
 
       // MultiPose keeps the athlete stable even when other people cross the frame.
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isMobile = isMobileDevice();
 
       const detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
@@ -346,7 +352,7 @@ const AnalysisPage = () => {
           modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
           enableSmoothing: true,
           minPoseScore: 0.3,
-          multiPoseMaxDimension: isMobile ? 256 : 384,
+          multiPoseMaxDimension: isMobile ? 192 : 320,
           enableTracking: true,
         }
       );
@@ -376,6 +382,7 @@ const AnalysisPage = () => {
       uploadedVideoRef.current = null;
       setUploadedVideoName(null);
       primaryPoseRef.current = null;
+      missingPoseFramesRef.current = 0;
       analysisSourceRef.current = 'camera';
       setAnalysisSource('camera');
       streamRef.current = stream;
@@ -418,6 +425,7 @@ const AnalysisPage = () => {
     setUploadedVideoName(null);
     setVideoAwaitingNext(false);
     primaryPoseRef.current = null;
+    missingPoseFramesRef.current = 0;
     analysisSourceRef.current = null;
     setAnalysisSource(null);
     setCameraActive(false);
@@ -458,6 +466,7 @@ const AnalysisPage = () => {
     setAnalysisSource('video');
     setVideoAwaitingNext(false);
     primaryPoseRef.current = null;
+    missingPoseFramesRef.current = 0;
 
     const video = videoRef.current;
     if (video) {
@@ -495,8 +504,12 @@ const AnalysisPage = () => {
 
     let lastTime = performance.now();
     let frameCount = 0;
+    let lastInferenceAt = 0;
+    const mobileRuntime = isMobileDevice();
+    let inferenceInterval = mobileRuntime ? 1000 / 12 : 1000 / 20;
+    let latencyAverage = inferenceInterval;
 
-    const detect = async () => {
+    const detect = async (timestamp = performance.now()) => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const detector = detectorRef.current;
@@ -505,27 +518,33 @@ const AnalysisPage = () => {
         return;
       }
 
+      if (timestamp - lastInferenceAt < inferenceInterval) {
+        animFrameRef.current = requestAnimationFrame(detect);
+        return;
+      }
+      lastInferenceAt = timestamp;
+
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-
+      const frameWidth = video.videoWidth || 640;
+      const frameHeight = video.videoHeight || 480;
+      if (canvas.width !== frameWidth) canvas.width = frameWidth;
+      if (canvas.height !== frameHeight) canvas.height = frameHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       const mirror = analysisSourceRef.current === 'camera';
-      if (mirror) {
-        ctx.save();
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, 0, 0);
-        ctx.restore();
-      } else {
-        ctx.drawImage(video, 0, 0);
-      }
 
       try {
         const exerciseId = selectedExerciseRef.current.id;
         const squatEpoch = squatEpochRef.current;
+        const inferenceStartedAt = performance.now();
         const poses = await detector.estimatePoses(video, { maxPoses: 6 });
+        const latency = performance.now() - inferenceStartedAt;
+        latencyAverage = latencyAverage * 0.8 + latency * 0.2;
+        // Mantém entre 8 e 15 análises/s no mobile, conforme a capacidade real.
+        if (mobileRuntime) {
+          inferenceInterval = Math.min(125, Math.max(1000 / 15, latencyAverage * 1.15));
+        }
         if (exerciseId !== selectedExerciseRef.current.id || squatEpoch !== squatEpochRef.current) {
           animFrameRef.current = requestAnimationFrame(detect);
           return;
@@ -533,19 +552,22 @@ const AnalysisPage = () => {
 
         const selection = selectPrimaryPose(poses, canvas.width, canvas.height, primaryPoseRef.current);
         if (selection?.pose.keypoints) {
+          missingPoseFramesRef.current = 0;
           primaryPoseRef.current = selection.identity;
           const keypoints = selection.pose.keypoints;
           drawSkeleton(ctx, keypoints, canvas.width, mirror);
+          const updateUi = performance.now() - lastUiUpdateRef.current >= 180;
+          if (updateUi) lastUiUpdateRef.current = performance.now();
 
           const checker = exerciseId === 'squat'
             ? (points: Keypoint[] | null) => checkSquatView(points, squatViewRef.current)
             : positionCheckers[exerciseId];
           if (checker) {
             const check = checker(keypoints);
-            setPosition(check);
+            if (updateUi) setPosition(check);
             positionOkRef.current = check.ready;
           } else {
-            setPosition(null);
+            if (updateUi) setPosition(null);
             positionOkRef.current = true;
           }
           
@@ -556,19 +578,21 @@ const AnalysisPage = () => {
             const squat = exerciseId === 'squat' ? squatCounterRef.current.update(keypoints) : null;
             const tracked = squat ?? curl;
             if (squat) {
-              setPosition(squat.position);
+              if (updateUi) setPosition(squat.position);
               positionOkRef.current = squat.position.ready;
-              setSquatMetric(squat.metric);
+              if (updateUi) setSquatMetric(squat.metric);
             }
             const result = tracked ? tracked.feedback : analyzer(keypoints);
             if (result) {
-              setFeedback(result);
+              if (updateUi) setFeedback(result);
               if (!tracked) drawFeedbackOverlay(ctx, result);
 
               // Rep state machine (hysteresis + smoothing)
               const rep = tracked ? tracked.rep : repCounterRef.current.update(result.angle);
-              setPhase(rep.phase);
-              setDepth(rep.progress);
+              if (updateUi) {
+                setPhase(rep.phase);
+                setDepth(rep.progress);
+              }
 
               // Collect feedback belonging to the current rep
               if (!tracked && (rep.phase !== "top" || rep.reachedBottom)) {
@@ -621,7 +645,7 @@ const AnalysisPage = () => {
               }
             }
           }
-        } else if (positionCheckers[selectedExerciseRef.current.id]) {
+        } else if (++missingPoseFramesRef.current >= 6 && positionCheckers[selectedExerciseRef.current.id]) {
           curlCounterRef.current.reset();
           const missingSquat = exerciseId === 'squat' ? squatCounterRef.current.update(null) : null;
           setPosition(exerciseId === 'squat' ? checkSquatView(null, squatViewRef.current) : positionCheckers[exerciseId](null));
@@ -737,7 +761,7 @@ const AnalysisPage = () => {
 
   return (
     <main className="pt-28 pb-20">
-      <div className="container mx-auto px-5 md:px-6 max-w-4xl">
+      <div className="container mx-auto px-3 sm:px-5 md:px-6 max-w-4xl">
         <div className="mb-6">
           <p className="eyebrow mb-2"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> Sessão de treino</p>
           <h1 className="font-display text-3xl md:text-4xl font-bold">Análise de movimento</h1>
@@ -826,18 +850,18 @@ const AnalysisPage = () => {
           <div className="relative rounded-3xl border border-border bg-card overflow-hidden aspect-[3/4] sm:aspect-video shadow-2xl shadow-black/20">
             <video
               ref={videoRef}
-              className={`h-full w-full object-contain ${analysisSource === 'camera' ? '-scale-x-100' : ''} ${!cameraActive || modelReady ? "hidden" : ""}`}
+              className={`absolute inset-0 h-full w-full object-contain ${analysisSource === 'camera' ? '-scale-x-100' : ''} ${!cameraActive ? "hidden" : ""}`}
               playsInline
               muted
               onEnded={() => { if (analysisSourceRef.current === 'video' && seriesActiveRef.current) void finishVideoAnalysis(); }}
             />
             <canvas
               ref={canvasRef}
-              className={`w-full h-full object-cover ${!cameraActive || !modelReady ? "hidden" : ""}`}
+              className={`pointer-events-none absolute inset-0 h-full w-full object-contain ${!cameraActive || !modelReady ? "hidden" : ""}`}
             />
 
             {cameraActive && (modelLoading || modelError) && (
-              <div className="absolute left-4 right-4 top-4 rounded-xl border border-border bg-background/85 px-4 py-3 text-center text-xs backdrop-blur-sm">
+              <div className="absolute left-4 right-4 top-4 z-10 rounded-xl border border-border bg-background/85 px-4 py-3 text-center text-xs backdrop-blur-sm">
                 {modelLoading ? (
                   <span className="inline-flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> Preparando análise de movimento...
@@ -873,7 +897,7 @@ const AnalysisPage = () => {
 
 
 
-            <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2">
+            <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2">
               {cameraActive ? <>
                 {analysisSource === 'video' && videoAwaitingNext && (
                   <button
