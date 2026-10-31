@@ -992,14 +992,14 @@ const AnalysisPage = () => {
             </button>
           )}
 
-          {cameraActive && !seriesActive && completedSeries.length > 0 && (
+          {!seriesActive && completedSeries.length > 0 && (
             <button
               type="button"
               disabled={savingSeries}
               onClick={() => finishWorkout(completedSeriesRef.current)}
               className="w-full rounded-2xl border border-border py-3 text-sm font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50"
             >
-              Encerrar treino com {completedSeries.length} {completedSeries.length === 1 ? 'série concluída' : 'séries concluídas'}
+              Finalizar exercício com {completedSeries.length} {completedSeries.length === 1 ? 'série concluída' : 'séries concluídas'}
             </button>
           )}
 
