@@ -21,6 +21,7 @@ import { buildSeriesReport, buildWorkoutReport, workoutNotes, type SeriesReport,
 import { applyPostureResults, loadGuestWorkouts, saveGuestWorkouts } from '@/lib/trainingLog';
 import { Link, useSearchParams } from 'react-router-dom';
 import { selectPrimaryPose, type TrackedPoseIdentity } from '@/lib/poseSelector';
+import { nextVideoFrame, seekVideoFrame } from '@/lib/videoFrames';
 
 import type { PoseDetector, Keypoint } from "@tensorflow-models/pose-detection";
 import * as tf from "@tensorflow/tfjs-core";
@@ -100,6 +101,7 @@ const AnalysisPage = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number>(0);
   const detectorRef = useRef<PoseDetector | null>(null);
+  const detectorCacheRef = useRef<Partial<Record<'camera' | 'video', PoseDetector>>>({});
   const multiPoseEnabledRef = useRef(false);
   const primaryPoseRef = useRef<TrackedPoseIdentity | null>(null);
   const missingPoseFramesRef = useRef(0);
@@ -336,7 +338,10 @@ const AnalysisPage = () => {
 
 
   const loadModel = useCallback(async () => {
-    if (detectorRef.current) return;
+    const source = analysisSourceRef.current === 'video' ? 'video' : 'camera';
+    setModelReady(false);
+    detectorRef.current = null;
+    squatEpochRef.current++;
     setModelLoading(true);
     setModelError(null);
 
@@ -347,15 +352,17 @@ const AnalysisPage = () => {
       // MultiPose keeps the athlete stable even when other people cross the frame.
       const isMobile = isMobileDevice();
 
-      const detector = await poseDetection.createDetector(
+      const detector = detectorCacheRef.current[source] ?? await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
-          modelType: isMobile
+          modelType: source === 'video'
+            ? poseDetection.movenet.modelType.SINGLEPOSE_THUNDER
+            : isMobile
             ? poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
             : poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
           enableSmoothing: true,
-          minPoseScore: isMobile ? 0.2 : 0.3,
-          ...(!isMobile && {
+          minPoseScore: source === 'video' || isMobile ? 0.2 : 0.3,
+          ...(source === 'camera' && !isMobile && {
             // Preserve leg detail in portrait videos and partially occluded poses.
             multiPoseMaxDimension: 512,
             enableTracking: true,
@@ -363,8 +370,9 @@ const AnalysisPage = () => {
         }
       );
 
+      detectorCacheRef.current[source] = detector;
       detectorRef.current = detector;
-      multiPoseEnabledRef.current = !isMobile;
+      multiPoseEnabledRef.current = source === 'camera' && !isMobile;
       setModelReady(true);
     } catch (err) {
       console.error("Erro ao carregar modelo:", err);
@@ -490,13 +498,18 @@ const AnalysisPage = () => {
   const startVideoAnalysis = useCallback(async () => {
     const video = videoRef.current;
     if (!video || analysisSourceRef.current !== 'video') return;
-    video.currentTime = 0;
-    startSeries();
+    video.pause();
+    setModelError(null);
+    setModelLoading(true);
+    squatEpochRef.current++;
     try {
-      await video.play();
+      await seekVideoFrame(video, Math.min(0.05, video.duration / 2));
+      startSeries();
     } catch {
       resetSeriesState();
       toast.error('Não foi possível reproduzir o vídeo. Tente outro arquivo.');
+    } finally {
+      setModelLoading(false);
     }
   }, [resetSeriesState, startSeries]);
 
@@ -504,10 +517,15 @@ const AnalysisPage = () => {
     videoRef.current?.pause();
     await stopSeries();
   }, [stopSeries]);
+  const finishVideoAnalysisRef = useRef(finishVideoAnalysis);
+  finishVideoAnalysisRef.current = finishVideoAnalysis;
 
   // Main detection + draw loop
   useEffect(() => {
-    if (!cameraActive || !detectorRef.current) return;
+    if (!cameraActive || !modelReady || !detectorRef.current) return;
+    const controller = new AbortController();
+    let lastVideoTime = -1;
+    let lastVideoEpoch = -1;
 
     let lastTime = performance.now();
     let frameCount = 0;
@@ -517,6 +535,7 @@ const AnalysisPage = () => {
     let latencyAverage = inferenceInterval;
 
     const detect = async (timestamp = performance.now()) => {
+      if (controller.signal.aborted) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const detector = detectorRef.current;
@@ -530,6 +549,11 @@ const AnalysisPage = () => {
         return;
       }
       lastInferenceAt = timestamp;
+      const isVideo = analysisSourceRef.current === 'video';
+      if (isVideo && (video.seeking || (lastVideoEpoch === squatEpochRef.current && Math.abs(video.currentTime-lastVideoTime) < 0.001))) {
+        animFrameRef.current = requestAnimationFrame(detect);
+        return;
+      }
 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -544,10 +568,14 @@ const AnalysisPage = () => {
       try {
         const exerciseId = selectedExerciseRef.current.id;
         const squatEpoch = squatEpochRef.current;
+        const mediaTime = video.currentTime;
+        if (isVideo && lastVideoEpoch !== squatEpoch) detector.reset();
+        const sampleTime = isVideo ? mediaTime * 1000 : Date.now();
         const inferenceStartedAt = performance.now();
         const poses = await detector.estimatePoses(video, {
           maxPoses: multiPoseEnabledRef.current ? 6 : 1,
-        });
+        }, isVideo ? sampleTime : undefined);
+        if (controller.signal.aborted) return;
         const latency = performance.now() - inferenceStartedAt;
         latencyAverage = latencyAverage * 0.8 + latency * 0.2;
         // Mantém entre 8 e 15 análises/s no mobile, conforme a capacidade real.
@@ -558,8 +586,10 @@ const AnalysisPage = () => {
           animFrameRef.current = requestAnimationFrame(detect);
           return;
         }
+        if (isVideo) { lastVideoEpoch = squatEpoch; lastVideoTime = mediaTime; }
 
-        const selection = selectPrimaryPose(poses, canvas.width, canvas.height, primaryPoseRef.current);
+        const selection = selectPrimaryPose(poses, canvas.width, canvas.height, primaryPoseRef.current,
+          exerciseId === 'squat' && squatViewRef.current === 'side');
         if (selection?.pose.keypoints) {
           missingPoseFramesRef.current = 0;
           primaryPoseRef.current = selection.identity;
@@ -583,8 +613,8 @@ const AnalysisPage = () => {
           // Analyze exercise
           const analyzer = exerciseAnalyzers[selectedExerciseRef.current.id];
           if (analyzer) {
-            const curl = selectedExerciseRef.current.id === 'bicep-curl' ? curlCounterRef.current.update(keypoints) : null;
-            const squat = exerciseId === 'squat' ? squatCounterRef.current.update(keypoints) : null;
+            const curl = selectedExerciseRef.current.id === 'bicep-curl' ? curlCounterRef.current.update(keypoints, sampleTime) : null;
+            const squat = exerciseId === 'squat' ? squatCounterRef.current.update(keypoints, sampleTime) : null;
             const tracked = squat ?? curl;
             if (squat) {
               if (updateUi) setPosition(squat.position);
@@ -597,7 +627,7 @@ const AnalysisPage = () => {
               if (!tracked) drawFeedbackOverlay(ctx, result);
 
               // Rep state machine (hysteresis + smoothing)
-              const rep = tracked ? tracked.rep : repCounterRef.current.update(result.angle);
+              const rep = tracked ? tracked.rep : repCounterRef.current.update(result.angle, sampleTime);
               if (updateUi) {
                 setPhase(rep.phase);
                 setDepth(rep.progress);
@@ -656,14 +686,29 @@ const AnalysisPage = () => {
           }
         } else if (exerciseId === 'squat' || (++missingPoseFramesRef.current >= 6 && positionCheckers[selectedExerciseRef.current.id])) {
           curlCounterRef.current.reset();
-          const missingSquat = exerciseId === 'squat' ? squatCounterRef.current.update(null) : null;
-          setPosition(missingSquat ? missingSquat.position : positionCheckers[exerciseId](null));
+          const missingSquat = exerciseId === 'squat' ? squatCounterRef.current.update(null, sampleTime) : null;
+          setPosition(missingSquat ? { ready: false, message: 'Não foi possível detectar a perna neste quadro — a postura ainda não foi avaliada' } : positionCheckers[exerciseId](null));
           if (exerciseId === 'squat') {
             setFeedback(missingSquat!.feedback); setPhase(missingSquat!.rep.phase); setDepth(missingSquat!.rep.progress); setSquatMetric(missingSquat!.metric);
           }
           positionOkRef.current = false;
         }
-      } catch {
+        if (isVideo && seriesActiveRef.current) {
+          const next = nextVideoFrame(mediaTime, video.duration);
+          if (next === null) {
+            await finishVideoAnalysisRef.current();
+            // Finishing resets the counters; keep the completed frame/result visible.
+            lastVideoEpoch = squatEpochRef.current;
+          }
+          else await seekVideoFrame(video, next, controller.signal);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (isVideo) {
+          setModelError('A leitura do vídeo foi interrompida. Tente iniciar a análise novamente.');
+          console.error('Falha na análise de vídeo:', error);
+          return;
+        }
         curlCounterRef.current.reset();
         squatCounterRef.current.reset(squatViewRef.current);
         // Silently continue on detection errors
@@ -682,8 +727,8 @@ const AnalysisPage = () => {
     };
 
     detect();
-    return () => cancelAnimationFrame(animFrameRef.current);
-  }, [cameraActive, modelReady]);
+    return () => { controller.abort(); cancelAnimationFrame(animFrameRef.current); };
+  }, [cameraActive, modelReady, analysisSource]);
 
   useEffect(() => {
     return () => stopCamera();
@@ -862,7 +907,6 @@ const AnalysisPage = () => {
               className={`absolute inset-0 h-full w-full object-contain ${analysisSource === 'camera' ? '-scale-x-100' : ''} ${!cameraActive ? "hidden" : ""}`}
               playsInline
               muted
-              onEnded={() => { if (analysisSourceRef.current === 'video' && seriesActiveRef.current) void finishVideoAnalysis(); }}
             />
             <canvas
               ref={canvasRef}
@@ -951,7 +995,7 @@ const AnalysisPage = () => {
               <Film className="h-4 w-4 shrink-0 text-primary" />
               <span className="min-w-0 flex-1 truncate">{uploadedVideoName}</span>
               <span className="shrink-0 text-muted-foreground">
-                {videoAwaitingNext ? `Série ${completedSeries.length} concluída · anexe o próximo vídeo` : `Vídeo da série ${completedSeries.length + 1} de ${plannedSeries}`}
+                {seriesActive ? 'Analisando quadro a quadro — o ritmo depende do aparelho' : videoAwaitingNext ? `Série ${completedSeries.length} concluída · anexe o próximo vídeo` : `Vídeo da série ${completedSeries.length + 1} de ${plannedSeries}`}
               </span>
             </div>
           )}
@@ -979,7 +1023,7 @@ const AnalysisPage = () => {
             <div className="rounded-2xl border border-primary/20 bg-primary/[0.07] p-4 text-center">
               <p className="text-[10px] text-muted-foreground font-bold tracking-[0.14em]">{selectedExercise.id === 'squat' && squatView === 'front' ? 'CICLOS ALINHADOS' : 'REPS'}</p>
               <p className="font-display text-3xl font-extrabold text-primary leading-tight">
-                {repCount}
+                {!seriesActive && report ? report.reps : repCount}
               </p>
               <div className="mt-2 h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                 <div
@@ -1077,7 +1121,7 @@ const AnalysisPage = () => {
                 </div>
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold text-warning">{report.warning}</p>
-                  <p className="text-[10px] text-muted-foreground">Para melhorar</p>
+                  <p className="text-[10px] text-muted-foreground">{report.limitedVisibility ? 'Com observações' : 'Para melhorar'}</p>
                 </div>
                 <div className="rounded-xl bg-muted/55 py-2.5">
                   <p className="text-base font-bold text-danger">{report.error}</p>
@@ -1086,7 +1130,7 @@ const AnalysisPage = () => {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Duração: {report.duration}s · Precisão técnica: {report.accuracy}%
+                Duração: {report.duration}s · {report.limitedVisibility ? 'Avaliação técnica parcial' : `Precisão técnica: ${report.accuracy}%`}
               </p>
 
               <p className="text-sm leading-snug">{report.summary}</p>
@@ -1094,7 +1138,7 @@ const AnalysisPage = () => {
               {report.points.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Pontos de melhoria
+                    Observações da análise
                   </p>
                   <ul className="space-y-1.5">
                     {report.points.map((p) => (
@@ -1124,11 +1168,11 @@ const AnalysisPage = () => {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
                 <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold">{workoutReport.reps}</p><p className="text-[10px] text-muted-foreground">Repetições</p></div>
                 <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-success">{workoutReport.correct}</p><p className="text-[10px] text-muted-foreground">Corretas</p></div>
-                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-warning">{workoutReport.warning}</p><p className="text-[10px] text-muted-foreground">Para melhorar</p></div>
+                <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-warning">{workoutReport.warning}</p><p className="text-[10px] text-muted-foreground">{workoutReport.limitedVisibility ? 'Com observações' : 'Para melhorar'}</p></div>
                 <div className="rounded-xl bg-background/55 py-3"><p className="text-xl font-bold text-danger">{workoutReport.error}</p><p className="text-[10px] text-muted-foreground">Incorretas</p></div>
               </div>
               <p className="text-sm">{workoutReport.summary}</p>
-              <p className="text-xs text-muted-foreground">Precisão técnica: {workoutReport.accuracy}% · Duração total: {workoutReport.duration}s</p>
+              <p className="text-xs text-muted-foreground">{workoutReport.limitedVisibility ? 'Avaliação técnica parcial' : `Precisão técnica: ${workoutReport.accuracy}%`} · Duração total: {workoutReport.duration}s</p>
               {trainingExerciseId && <Link to="/treinos" className="inline-flex rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground">Voltar ao treino registrado</Link>}
             </motion.section>
           )}
@@ -1225,7 +1269,7 @@ const AnalysisPage = () => {
               </p>
               <p className="text-xs text-muted-foreground font-mono">
                 {selectedExercise.angleRange.joint} {selectedExercise.angleRange.min}°–
-                {selectedExercise.angleRange.max}° · {modelReady ? "MoveNet pronto" : "Modelo não carregado"}
+                {selectedExercise.angleRange.max}° · {modelReady ? analysisSource === 'video' ? "Análise quadro a quadro pronta" : "MoveNet pronto" : "Modelo não carregado"}
                 {cameraActive ? ` · ${fps} FPS` : ""}
               </p>
             </div>

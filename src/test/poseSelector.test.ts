@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Keypoint, Pose } from '@tensorflow-models/pose-detection';
 import { selectPrimaryPose } from '@/lib/poseSelector';
+import { checkSquatView } from '@/lib/squatCounter';
 
 function person(id: number, centerX: number, centerY: number, size: number): Pose {
   const points = Array.from({ length: 17 }, (_, index) => {
@@ -16,6 +17,26 @@ function person(id: number, centerX: number, centerY: number, size: number): Pos
 }
 
 describe('selectPrimaryPose', () => {
+  it('permite que uma perna detectada chegue ao contador lateral mesmo sem cinco pontos', () => {
+    const pose = person(1, 320, 240, 300);
+    pose.keypoints.forEach((p,i) => { p.score = [12,14,16].includes(i) ? 0.3 : 0.1; });
+    expect(checkSquatView(pose.keypoints, 'side').ready).toBe(true);
+    expect(selectPrimaryPose([pose], 640, 480)).toBeNull();
+    expect(selectPrimaryPose([pose], 640, 480, null, true)?.pose).toBe(pose);
+  });
+
+  it('não monta uma perna com pontos de lados opostos', () => {
+    const pose = person(1, 320, 240, 300);
+    pose.keypoints.forEach((p,i) => { p.score = [12,13,15].includes(i) ? 0.8 : 0.1; });
+    expect(selectPrimaryPose([pose], 640, 480, null, true)).toBeNull();
+  });
+
+  it('rejeita coordenadas inválidas mesmo com confiança alta', () => {
+    const pose = person(1, 320, 240, 300);
+    pose.keypoints.forEach(p => { p.x = NaN; });
+    expect(selectPrimaryPose([pose], 640, 480, null, true)).toBeNull();
+    expect(selectPrimaryPose([], 640, 480, null, true)).toBeNull();
+  });
   it('prioriza a pessoa maior e mais próxima da câmera', () => {
     const selected = selectPrimaryPose([person(1, 320, 240, 100), person(2, 330, 250, 320)], 640, 480);
     expect(selected?.pose.id).toBe(2);

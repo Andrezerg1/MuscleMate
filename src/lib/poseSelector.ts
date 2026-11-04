@@ -11,9 +11,11 @@ export interface PrimaryPoseSelection {
   identity: TrackedPoseIdentity;
 }
 
-function visibleBounds(keypoints: Keypoint[]) {
-  const visible = keypoints.filter(point => (point.score ?? 0) >= 0.25);
-  if (visible.length < 5) return null;
+function visibleBounds(keypoints: Keypoint[], allowVisibleLeg: boolean) {
+  const usable = (point: Keypoint | undefined) => !!point && (point.score ?? 0) >= 0.25 && Number.isFinite(point.x) && Number.isFinite(point.y);
+  const visible = keypoints.filter(usable);
+  const hasLeg = allowVisibleLeg && [[11,13,15], [12,14,16]].some(ids => ids.every(i => usable(keypoints[i])));
+  if (visible.length < 5 && !hasLeg) return null;
   const xs = visible.map(point => point.x);
   const ys = visible.map(point => point.y);
   const left = Math.min(...xs);
@@ -38,11 +40,12 @@ export function selectPrimaryPose(
   frameWidth: number,
   frameHeight: number,
   previous?: TrackedPoseIdentity | null,
+  allowVisibleLeg = false,
 ): PrimaryPoseSelection | null {
   const diagonal = Math.hypot(frameWidth, frameHeight) || 1;
   const frameArea = Math.max(1, frameWidth * frameHeight);
   const candidates = poses.flatMap(pose => {
-    const bounds = visibleBounds(pose.keypoints);
+    const bounds = visibleBounds(pose.keypoints, allowVisibleLeg);
     if (!bounds) return [];
     const centerDistance = Math.hypot(bounds.centerX - frameWidth / 2, bounds.centerY - frameHeight / 2) / diagonal;
     let continuity = 0;
