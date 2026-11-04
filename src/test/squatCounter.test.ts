@@ -73,7 +73,7 @@ describe('lateral squat: standing → depth → standing', () => {
   });
   it('does not switch to the other leg mid-rep', () => {
     const p = cycle();
-    for (let j=12;j<18;j++) p[j] = p[j].map((v,i)=>i===14?{...v,score:0.1}:v);
+    for (let j=9;j<21;j++) p[j] = p[j].map((v,i)=>i===14?{...v,score:0.1}:v);
     expect(run(p).some(r=>r.rep.repCompleted)).toBe(false);
   });
   it('accepts a relaxed return without locking the knees', () => {
@@ -109,7 +109,7 @@ describe('lateral squat: standing → depth → standing', () => {
     expect(run(frames,'side',step).filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
   it('abandons stale tracking and times out long interrupted attempts', () => {
-    for (const gap of [500,21000]) {
+    for (const gap of [900,21000]) {
       const c = new SquatCounter();
       cycle().slice(0,16).forEach((p,i)=>c.update(p,1000+i*100));
       expect(cycle().slice(16).map((p,i)=>c.update(p,2500+gap+i*100)).some(r=>r.rep.repCompleted)).toBe(false);
@@ -120,6 +120,57 @@ describe('lateral squat: standing → depth → standing', () => {
     expect(run([...bad,...cycle()]).filter(r=>r.rep.repCompleted)).toHaveLength(1);
   });
 });
+describe('lateral squat with partial visibility', () => {
+  it('counts a visible leg when both shoulders are hidden, without claiming good trunk posture', () => {
+    const frames = cycle().map(p => p.map((v,i) => [5,6].includes(i) ? {...v, score:0.1} : v));
+    const result = run(frames);
+    const completed = result.filter(r => r.rep.repCompleted);
+    expect(completed).toHaveLength(1);
+    expect(completed[0].warning).toContain('tronco não avaliado');
+    expect(completed[0].feedback.level).toBe('warning');
+    expect(result.every(r => r.metric.includes('tronco não avaliado'))).toBe(true);
+  });
+  it('accepts moderate leg confidence but reports limited observation', () => {
+    const frames = cycle().map(p => p.map((v,i) => [13,14,15,16].includes(i) ? {...v, score:0.28} : v));
+    const completed = run(frames).filter(r => r.rep.repCompleted);
+    expect(completed).toHaveLength(1);
+    expect(completed[0].warning).toContain('visibilidade parcial');
+  });
+  it('never counts when both legs are missing throughout the descent', () => {
+    const frames = cycle().map((p,j) => p.map((v,i) => j>=3 && j<24 && [13,14,15,16].includes(i) ? {...v, score:0.1} : v));
+    expect(run(frames).some(r => r.rep.repCompleted)).toBe(false);
+  });
+  it('preserves observed depth across a 600ms interruption and reports partial evaluation', () => {
+    const frames: (Keypoint[] | null)[] = cycle();
+    for (let i=15; i<20; i++) frames[i] = null;
+    const result = run(frames);
+    expect(result.slice(15,20).every(r => !r.rep.repCompleted && !r.rejected)).toBe(true);
+    const completed = result.filter(r => r.rep.repCompleted);
+    expect(completed).toHaveLength(1);
+    expect(completed[0].warning).toContain('avaliação parcial');
+  });
+  it('does not invent depth hidden inside a brief interruption', () => {
+    const frames: (Keypoint[] | null)[] = [175,175,140,120,null,null,null,120,140,175].map(a => a === null ? null : sidePose(a));
+    expect(run(frames).some(r => r.rep.repCompleted)).toBe(false);
+  });
+  it('keeps a detected posture fault even if the shoulder disappears afterward', () => {
+    const frames = angles.flatMap(a => repeat(sidePose(a, a===85 ? 78 : 15)))
+      .map((p,j) => p.map((v,i) => j>=18 && [5,6].includes(i) ? {...v,score:0.1} : v));
+    const result = run(frames);
+    expect(result.some(r => r.rep.repCompleted)).toBe(false);
+    expect(result.find(r => r.rejected)?.feedback.message).toContain('Inclinação excessiva');
+  });
+  it('accepts a slightly oblique view while rejecting a clearly frontal view', () => {
+    const p = sidePose(175); p[5] = {...p[6],x:p[6].x+140};
+    expect(checkSquatView(p,'side').ready).toBe(true);
+    expect(checkSquatView(frontPose(0),'side').ready).toBe(false);
+  });
+  it('does not connect a right hip to a left knee and ankle', () => {
+    const frames = cycle().map(p => p.map((v,i) => [11,14].includes(i) ? {...v,score:0.1} : v));
+    expect(run(frames).some(r => r.rep.repCompleted)).toBe(false);
+  });
+});
+
 describe('frontal squat: alignment, not sagittal depth', () => {
   const drops = [0,40,90,120,90,40,0];
   it('counts a complete aligned vertical cycle', () => {
@@ -162,7 +213,9 @@ describe('view and input validation', () => {
     const p = frontPose(0); p[13].score=0.1;
     expect(checkSquatView(p,'front').ready).toBe(false);
     p[5].x=NaN; p[6].x=NaN;
-    expect(new SquatCounter().update(p).position.ready).toBe(false);
+    const result = new SquatCounter().update(p);
+    expect(result.rep.repCompleted).toBe(false);
+    expect(result.metric).toContain('tronco não avaliado');
   });
   it('resetting for another view clears the unfinished attempt', () => {
     const c = new SquatCounter(); cycle().slice(0,16).forEach((p,i)=>c.update(p,1000+i*100));

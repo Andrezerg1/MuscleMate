@@ -5,7 +5,7 @@
 - **De frente:** observa cada joelho em relação à linha quadril–tornozelo e à posição inicial. Sinaliza deslocamento medial persistente; não diagnostica valgo tridimensional. Conta ciclos de descida e subida com alinhamento frontal, sem afirmar profundidade de 90°.
 - **De lado:** mede flexão projetada do joelho, espera início em pé, descida até 105° ou menos (alvo 90° com margem de 15°) e retorno a pelo menos 155°, com quadril/tronco novamente em pé. Profundidades maiores não são rejeitadas automaticamente.
 - A vista é fixa durante a série. Relatório e histórico identificam De frente/De lado pelo nome do exercício, mantendo o ID `squat` e o banco existente.
-- O contador reinicia na troca de exercício/vista/série, parada da câmera ou ausência de amostras válidas por mais de 400 ms. Uma perda breve pausa a avaliação sem contar nem acumular permanência no fundo. Frames em voo de uma configuração anterior são ignorados.
+- O contador reinicia na troca de exercício/vista/série, parada da câmera ou ausência de amostras válidas por mais de 800 ms na lateral e 400 ms na frontal. Uma perda breve pausa a avaliação sem contar nem acumular permanência no fundo. Frames em voo de uma configuração anterior são ignorados.
 - Feedback em um único painel: início, retorno e resultado estáveis. Desvios persistentes são informados ao concluir a tentativa, sem sobreposição na câmera ou números oscilando a cada quadro.
 
 ## Tolerâncias iniciais de câmera
@@ -13,13 +13,19 @@
 Os valores em `src/lib/squatCounter.ts` são heurísticas ajustáveis, não limites clínicos validados:
 
 - Posição inicial em pé: duas observações separadas por pelo menos 50 ms. Na vista lateral, a profundidade requer duas observações; na frontal, o pico é preservado mesmo em uma amostra rápida. A máquina mantém o erro até terminar a tentativa.
-- Ciclo observado entre 120 ms e 20 s; intervalo sem amostra válida maior que 400 ms exige nova posição inicial.
+- Ciclo observado entre 120 ms e 20 s; intervalo sem amostra válida maior que 800 ms na lateral (400 ms na frontal) exige nova posição inicial.
 - Medialização frontal: diferença em relação à posição inicial normalizada pelo comprimento projetado da perna (aviso >1,5%, rejeição >3,5%). Pernas avaliadas independentemente, considerando espelhamento.
 - Frente: descida vertical do quadril relativa ao tornozelo, normalizada pela perna inicial. Saída da posição inicial: 8%; ciclo observado: 16%; retorno: até 6%. Esses números detectam movimento, não estimam a flexão sagital.
 - Inclinação lateral do tronco: aviso acima de 55°, rejeição persistente acima de 70° ou para trás acima de 25°. O retorno exige alinhamento próximo ao inicial.
 - Avanço horizontal joelho–tornozelo superior a 65% da canela inicial gera orientação, não rejeição automática. Mobilidade e proporções corporais influenciam esse avanço.
 
 ## Limites da medição
+
+Na vista lateral, quadril, joelho e tornozelo da mesma perna com confiança a partir de 0,25 permitem acompanhar o ciclo. A perna permanece fixa durante a tentativa: pontos dos lados opostos não são combinados. O ombro pode estar oculto; nesse caso a amplitude continua sendo medida, mas o tronco aparece como não avaliado. Pontos de perna abaixo de 0,35 ou falhas de observação durante a tentativa geram um aviso de avaliação parcial no resultado, não uma aprovação completa da postura. O aviso descreve uma limitação da detecção, não um erro técnico do atleta.
+
+A inclinação do tronco só é avaliada com ombro e quadril confiáveis (0,35). Um desvio já observado continua registrado mesmo se o ombro desaparecer depois. A tolerância de enquadramento lateral permite uma vista levemente oblíqua; a vista claramente frontal continua bloqueada quando o tronco é observável. Os limites de profundidade, extensão e desvios posturais foram preservados. Uma perda que esconda toda a profundidade não produz uma repetição validada.
+
+No desktop, o MoveNet MultiPose usa dimensão máxima de 512 para preservar mais detalhe em vídeos verticais; o custo de processamento deve ser verificado no aparelho alvo. Mobile mantém SinglePose Lightning.
 
 MoveNet fornece ombros/quadris/joelhos/tornozelos. Não fornece curvatura lombar, pressão plantar ou ponto do calcanhar. A interface explicita que não confirma lombar nem apoio do calcanhar. O ângulo frontal não é usado para validar 90° de flexão. É preciso começar realmente em pé: uma imagem frontal isolada não distingue todas as posturas agachadas com segmentos sobrepostos.
 

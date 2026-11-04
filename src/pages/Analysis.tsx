@@ -356,7 +356,8 @@ const AnalysisPage = () => {
           enableSmoothing: true,
           minPoseScore: isMobile ? 0.2 : 0.3,
           ...(!isMobile && {
-            multiPoseMaxDimension: 320,
+            // Preserve leg detail in portrait videos and partially occluded poses.
+            multiPoseMaxDimension: 512,
             enableTracking: true,
           }),
         }
@@ -653,12 +654,12 @@ const AnalysisPage = () => {
               }
             }
           }
-        } else if (++missingPoseFramesRef.current >= 6 && positionCheckers[selectedExerciseRef.current.id]) {
+        } else if (exerciseId === 'squat' || (++missingPoseFramesRef.current >= 6 && positionCheckers[selectedExerciseRef.current.id])) {
           curlCounterRef.current.reset();
           const missingSquat = exerciseId === 'squat' ? squatCounterRef.current.update(null) : null;
-          setPosition(exerciseId === 'squat' ? checkSquatView(null, squatViewRef.current) : positionCheckers[exerciseId](null));
+          setPosition(missingSquat ? missingSquat.position : positionCheckers[exerciseId](null));
           if (exerciseId === 'squat') {
-            setFeedback(missingSquat!.feedback); setPhase(missingSquat!.rep.phase); setDepth(missingSquat!.rep.progress); setSquatMetric('Aguardando enquadramento');
+            setFeedback(missingSquat!.feedback); setPhase(missingSquat!.rep.phase); setDepth(missingSquat!.rep.progress); setSquatMetric(missingSquat!.metric);
           }
           positionOkRef.current = false;
         }
